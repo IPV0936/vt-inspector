@@ -792,8 +792,8 @@
       <button class="btn-download" id="btnDlJson" disabled onclick="downloadJSON()">
         ⬇ JSON
       </button>
-      <button class="btn-download btn-download-primary" id="btnDlXls" disabled onclick="downloadXLSX()">
-        ⬇ Excel PHC
+      <button class="btn-download btn-download-primary" id="btnDlXls" disabled onclick="downloadReport()">
+        ⬇ Relatório PDF
       </button>
     </div>
   </div>
@@ -1364,330 +1364,279 @@ async function analyse() {
 // ══════════════════════════════════════════════════════════════════════════
 function downloadJSON() {
   if (!currentResult) return;
+  const est = currentResult.estacao || {};
   const blob = new Blob([JSON.stringify(currentResult, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `necessidades_${(currentResult.estacao?.id || "obra").replace(/\s+/g, "_")}.json`;
+  a.download = "necessidades_" + (est.id || "obra").replace(/\s+/g, "_") + ".json";
   a.click();
 }
 
-function downloadXLSX() {
+function downloadReport() {
   if (!currentResult) return;
-  const est  = currentResult.estacao || {};
-  const wb   = XLSX.utils.book_new();
+  const est     = currentResult.estacao || {};
+  const today   = new Date().toLocaleDateString("pt-PT");
+  const priorLabel = est.prioridade===1 ? "NÍVEL 1 – IMEDIATA" : est.prioridade===2 ? "NÍVEL 2 – ALTA" : "NÍVEL 3 – MÉDIA";
+  const priorColor = est.prioridade===1 ? "#c0392b" : est.prioridade===2 ? "#e67e22" : "#27ae60";
 
-  // ── BRAND COLOURS (Pingos Service) ──
-  const C = {
-    darkBlue:  'FF1F3864',
-    medBlue:   'FF2E75B6',
-    lightBlue: 'FFD6E4F0',
-    orange:    'FFED7D31',
-    white:     'FFFFFFFF',
-    black:     'FF000000',
-    grey:      'FFF2F2F2',
-    red:       'FFFFC7CE',
-    redFg:     'FF9C0006',
-    green:     'FFC6EFCE',
-    greenFg:   'FF276221',
-    yellow:    'FFFFEB9C',
-    yellowFg:  'FF9C6500',
-    muted:     'FF6B7280',
-  };
-
-  function cellStyle(bgColor, fgColor, bold, sz, wrap, halign) {
-    return {
-      fill:      { patternType: 'solid', fgColor: { rgb: bgColor || C.white } },
-      font:      { name: 'Arial', sz: sz||10, bold: !!bold, color: { rgb: fgColor||C.black } },
-      alignment: { horizontal: halign||'left', vertical: 'center', wrapText: !!wrap },
-      border: {
-        top:    { style:'thin', color:{rgb:'FFD0D5DD'} },
-        bottom: { style:'thin', color:{rgb:'FFD0D5DD'} },
-        left:   { style:'thin', color:{rgb:'FFD0D5DD'} },
-        right:  { style:'thin', color:{rgb:'FFD0D5DD'} },
-      }
-    };
-  }
-
-  function addSheet(name, buildFn) {
-    const data = [];
-    const merges = [];
-    const rowHeights = [];
-    const colWidths = [];
-    buildFn(data, merges, rowHeights, colWidths);
-    const ws = XLSX.utils.aoa_to_sheet(data.map(r => r.map(c => c && c.v !== undefined ? c.v : c)));
-    // Apply styles
-    data.forEach((row, ri) => {
-      row.forEach((cell, ci) => {
-        if (cell && cell.s) {
-          const addr = XLSX.utils.encode_cell({r: ri, c: ci});
-          if (!ws[addr]) ws[addr] = { v: cell.v, t: typeof cell.v === 'number' ? 'n' : 's' };
-          ws[addr].s = cell.s;
-        }
-      });
-    });
-    if (merges.length) ws['!merges'] = merges;
-    if (rowHeights.length) ws['!rows'] = rowHeights;
-    if (colWidths.length) ws['!cols'] = colWidths;
-    XLSX.utils.book_append_sheet(wb, ws, name);
-  }
-
-  const priorLabel  = est.prioridade === 1 ? 'NÍVEL 1 – IMEDIATA' : est.prioridade === 2 ? 'NÍVEL 2 – ALTA' : 'NÍVEL 3 – MÉDIA';
-  const priorBg     = est.prioridade === 1 ? C.red : est.prioridade === 2 ? C.yellow : C.green;
-  const priorFg     = est.prioridade === 1 ? C.redFg : est.prioridade === 2 ? C.yellowFg : C.greenFg;
-  const today       = new Date().toLocaleDateString('pt-PT');
-
-  function sc(v, bg, fg, bold, sz, wrap, ha) { return { v, s: cellStyle(bg, fg, bold, sz, wrap, ha) }; }
-  function blank(bg) { return { v: '', s: cellStyle(bg||C.white) }; }
-
-  // ════════════════════════════════════════════════════════════════
-  // SHEET 1 — NECESSIDADES
-  // ════════════════════════════════════════════════════════════════
-  addSheet('Necessidades', (data, merges, rh, cw) => {
-    cw.push(...[{wch:6},{wch:14},{wch:13},{wch:52},{wch:18},{wch:6},{wch:7},{wch:8},{wch:16},{wch:40}]);
-
-    // Row 1 — Logo row (tall)
-    data.push(Array(10).fill(blank(C.white)));
-    rh.push({hpt: 60});
-
-    // Row 2 — Title
-    data.push([
-      sc('LEVANTAMENTO DE NECESSIDADES — ' + (est.id||'').toUpperCase(), C.darkBlue, C.white, true, 13, false, 'left'),
-      ...Array(9).fill(blank(C.darkBlue))
-    ]);
-    merges.push({s:{r:1,c:0}, e:{r:1,c:9}});
-    rh.push({hpt:28});
-
-    // Row 3 — subtitle
-    const subTitle = (est.torre_tipo||'Torre') + (est.torre_altura?' '+est.torre_altura:'') +
-      '  |  Inspeção ISQ: '+(est.data_inspecao||'—') +
-      '  |  Prioridade: '+priorLabel+
-      '  |  Exportado: '+today;
-    data.push([sc(subTitle, C.medBlue, C.white, false, 9, false, 'left'), ...Array(9).fill(blank(C.medBlue))]);
-    merges.push({s:{r:2,c:0}, e:{r:2,c:9}});
-    rh.push({hpt:18});
-
-    // Row 4 — Obra info bar
-    data.push([
-      sc('📍 '+(est.morada||est.local||'—'), C.lightBlue, C.darkBlue, false, 9, false, 'left'),
-      ...Array(6).fill(blank(C.lightBlue)),
-      sc(priorLabel, priorBg, priorFg, true, 9, false, 'center'),
-      ...Array(2).fill(blank(priorBg))
-    ]);
-    merges.push({s:{r:3,c:0}, e:{r:3,c:6}});
-    merges.push({s:{r:3,c:7}, e:{r:3,c:9}});
-    rh.push({hpt:18});
-
-    data.push(Array(10).fill(blank(C.white))); rh.push({hpt:6});
-
-    function sectionHeader(label) {
-      data.push([sc('▌ '+label, C.orange, C.white, true, 11, false, 'left'), ...Array(9).fill(blank(C.orange))]);
-      merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:9}});
-      rh.push({hpt:22});
-    }
-    function colHeaders() {
-      data.push(['#','Ref. PHC','Ref. MTMQ','Designação','Família','Un','Qt.','Stock','Estado','Observações'].map(
-        h => sc(h, C.medBlue, C.white, true, 10, true, 'center')
-      ));
-      rh.push({hpt:28});
-    }
-    function stockBg(stock, qty) {
-      if (stock === null || stock === undefined) return [C.grey, C.muted, '—'];
-      if (stock === 0)       return [C.red,    C.redFg,    '⚠ Sem stock'];
-      if (stock < qty)       return [C.yellow, C.yellowFg, '⚠ Stock baixo'];
-      return [C.green, C.greenFg, '✔ Disponível'];
-    }
-
-    // Group materials by familia
-    const groups = { 'MATERIAL PROPRIO': [], 'EPIS/FARDAMENTO': [], 'FERRAMENTA': [], 'MAQUINA': [], 'SERVIÇOS': [], 'Outro': [] };
-    const labels = { 'MATERIAL PROPRIO':'MATERIAIS', 'EPIS/FARDAMENTO':'EPI / FARDAMENTO', 'FERRAMENTA':'FERRAMENTAS', 'MAQUINA':'MÁQUINAS', 'SERVIÇOS':'SERVIÇOS', 'Outro':'OUTROS' };
-    allNeeds.forEach(m => {
-      const g = groups[m.familia] ? m.familia : 'Outro';
-      groups[g].push(m);
-    });
-
-    let totalItems = 0;
-    for (const [fam, items] of Object.entries(groups)) {
-      if (!items.length) continue;
-      sectionHeader(labels[fam] + ' (' + items.length + ')');
-      colHeaders();
-      items.forEach((m, i) => {
-        totalItems++;
-        const qty = typeof m.quantidade === 'number' ? m.quantidade : parseFloat(m.quantidade)||0;
-        const [bg, fg, stLabel] = stockBg(m.stock, qty);
-        const rowBg = i%2===0 ? C.grey : C.white;
-        data.push([
-          sc(totalItems,           rowBg, C.black, false, 10, false, 'center'),
-          sc(m.ref_artigo||'—',    rowBg, m.ref_artigo ? '4400519B' : C.muted, false, 10, false, 'center'),
-          sc(m.ref_mtmq||'—',      rowBg, C.muted, false, 9,  false, 'center'),
-          sc(m.nome_artigo||m.descricao_tecnica||'—', rowBg, C.black, false, 10, true,  'left'),
-          sc(m.familia||'—',       rowBg, C.muted, false, 9,  false, 'center'),
-          sc(m.unidade||'un',      rowBg, C.black, false, 10, false, 'center'),
-          sc(qty,                  rowBg, C.black, true,  10, false, 'center'),
-          sc(m.stock!==null?m.stock:'—', bg===C.red?C.red:bg===C.yellow?C.yellow:rowBg, fg, true, 10, false, 'center'),
-          sc(stLabel,              bg,    fg,    true,  9,  false, 'center'),
-          sc(m.notas||'',          rowBg, C.muted, false, 9,  true,  'left'),
-        ]);
-        rh.push({hpt:18});
-      });
-      data.push(Array(10).fill(blank(C.white))); rh.push({hpt:6});
-    }
-
-    // Footer
-    data.push([
-      sc('Pingos Service — Building Your Communications  |  Total: '+allNeeds.length+' artigos  |  Gerado em: '+today,
-         C.darkBlue, C.white, false, 9, false, 'left'),
-      ...Array(9).fill(blank(C.darkBlue))
-    ]);
-    merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:9}});
-    rh.push({hpt:18});
+  // Group materials by family
+  const groups = {};
+  const famOrder = ["MATERIAL PROPRIO","EPIS/FARDAMENTO","MAQUINA","FERRAMENTA","SERVIÇOS"];
+  const famLabel = {"MATERIAL PROPRIO":"Materiais","EPIS/FARDAMENTO":"EPI / Fardamento","MAQUINA":"Máquinas","FERRAMENTA":"Ferramentas","SERVIÇOS":"Serviços"};
+  allNeeds.forEach(m => {
+    const g = famOrder.includes(m.familia) ? m.familia : "Outro";
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(m);
   });
 
-  // ════════════════════════════════════════════════════════════════
-  // SHEET 2 — RESUMO EXECUTIVO (CEO)
-  // ════════════════════════════════════════════════════════════════
-  addSheet('Resumo Executivo', (data, merges, rh, cw) => {
-    cw.push(...[{wch:22},{wch:65},{wch:14}]);
-
-    // Logo row
-    data.push([blank(C.white), blank(C.white), blank(C.white)]);
-    rh.push({hpt:65});
-
-    // Title
-    data.push([sc('RELATÓRIO DE NECESSIDADES DE MANUTENÇÃO', C.darkBlue, C.white, true, 14, false, 'left'), blank(C.darkBlue), blank(C.darkBlue)]);
-    merges.push({s:{r:1,c:0}, e:{r:1,c:2}}); rh.push({hpt:30});
-
-    data.push([sc('Vantage Towers O&M  ·  Pingos Service  ·  '+today, C.medBlue, C.white, false, 10, false, 'left'), blank(C.medBlue), blank(C.medBlue)]);
-    merges.push({s:{r:2,c:0}, e:{r:2,c:2}}); rh.push({hpt:18});
-
-    data.push([blank(C.white), blank(C.white), blank(C.white)]); rh.push({hpt:8});
-
-    // Obra info card
-    const infoRows = [
-      ['Estação', est.id||'—'],
-      ['Localização', est.morada||est.local||'—'],
-      ['Tipo de Torre', (est.torre_tipo||'—')+(est.torre_altura?' · '+est.torre_altura:'')],
-      ['Data de Inspeção', est.data_inspecao||'—'],
-      ['Prioridade', priorLabel],
-      ['Dias Necessários', (currentResult.dias_estimados||'—')+' dia(s) útil(is)'],
-    ];
-    infoRows.forEach(([k,v], i) => {
-      const bg = i%2===0 ? C.grey : C.white;
-      data.push([sc(k, bg, C.muted, true, 10, false, 'left'), sc(v, bg, C.darkBlue, false, 10, true, 'left'), blank(bg)]);
-      merges.push({s:{r:data.length-1,c:1}, e:{r:data.length-1,c:2}});
-      rh.push({hpt:18});
-    });
-
-    data.push([blank(C.white), blank(C.white), blank(C.white)]); rh.push({hpt:8});
-
-    // Tarefas
-    data.push([sc('▌ TAREFAS A EXECUTAR', C.orange, C.white, true, 11, false, 'left'), blank(C.orange), blank(C.orange)]);
-    merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:2}}); rh.push({hpt:22});
-    data.push(['Ref. MTMQ','Tarefa','Urgência'].map(h => sc(h, C.medBlue, C.white, true, 10, false, 'center')));
-    rh.push({hpt:22});
-
-    (currentResult.tarefas||[]).forEach((t, i) => {
-      const urgBg  = t.urgencia==='alta' ? C.red    : t.urgencia==='media' ? C.yellow : C.green;
-      const urgFg  = t.urgencia==='alta' ? C.redFg  : t.urgencia==='media' ? C.yellowFg : C.greenFg;
-      const urgLbl = t.urgencia==='alta' ? '🔴 ALTA' : t.urgencia==='media' ? '🟡 MÉDIA' : '🟢 BAIXA';
-      const rowBg  = i%2===0 ? C.grey : C.white;
-      data.push([
-        sc(t.ref_mtmq||'—', rowBg, C.orange, true, 10, false, 'center'),
-        sc(t.descricao||'—', rowBg, C.black, false, 10, true, 'left'),
-        sc(urgLbl, urgBg, urgFg, true, 9, false, 'center'),
-      ]);
-      rh.push({hpt:20});
-    });
-
-    data.push([blank(C.white), blank(C.white), blank(C.white)]); rh.push({hpt:8});
-
-    // Planeamento
-    data.push([sc('▌ PLANEAMENTO', C.orange, C.white, true, 11, false, 'left'), blank(C.orange), blank(C.orange)]);
-    merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:2}}); rh.push({hpt:22});
-    data.push(['Dia','Tarefas','Duração'].map(h => sc(h, C.medBlue, C.white, true, 10, false, 'center')));
-    rh.push({hpt:22});
-    (currentResult.planeamento||[]).forEach((d, i) => {
-      const bg = i%2===0 ? C.grey : C.white;
-      data.push([
-        sc('Dia '+d.dia, bg, C.darkBlue, true, 11, false, 'center'),
-        sc(Array.isArray(d.tarefas)?d.tarefas.join(' · '):d.tarefas||'', bg, C.black, false, 10, true, 'left'),
-        sc(d.horas||'—', bg, C.medBlue, true, 10, false, 'center'),
-      ]);
-      rh.push({hpt:28});
-    });
-
-    data.push([blank(C.white), blank(C.white), blank(C.white)]); rh.push({hpt:8});
-
-    // Alertas
-    const stockZero = allNeeds.filter(m => m.stock === 0);
-    if (stockZero.length || (currentResult.alertas||[]).length) {
-      data.push([sc('▌ ALERTAS', C.red.replace('FF','FF'), C.redFg, true, 11, false, 'left'), blank(C.red), blank(C.red)]);
-      merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:2}}); rh.push({hpt:22});
-      stockZero.forEach(m => {
-        data.push([
-          sc('⚠ SEM STOCK', C.red, C.redFg, true, 10, false, 'center'),
-          sc((m.ref_artigo||'—') + ' — ' + (m.nome_artigo||m.descricao_tecnica||'—'), C.red, C.redFg, false, 10, true, 'left'),
-          sc('Encomendar', C.red, C.redFg, true, 9, false, 'center'),
-        ]);
-        rh.push({hpt:18});
-      });
-      (currentResult.alertas||[]).forEach(a => {
-        data.push([
-          sc('⚠', C.yellow, C.yellowFg, true, 10, false, 'center'),
-          sc(a.descricao||'', C.yellow, C.yellowFg, false, 10, true, 'left'),
-          sc(a.tipo||'—', C.yellow, C.yellowFg, true, 9, false, 'center'),
-        ]);
-        rh.push({hpt:18});
-      });
-    }
-
-    // Footer
-    data.push([blank(C.white), blank(C.white), blank(C.white)]); rh.push({hpt:8});
-    data.push([
-      sc('Pingos Service  ·  Building Your Communications  ·  Documento gerado automaticamente em '+today,
-         C.darkBlue, C.white, false, 9, false, 'left'),
-      blank(C.darkBlue), blank(C.darkBlue)
-    ]);
-    merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:2}}); rh.push({hpt:18});
-  });
-
-  // ════════════════════════════════════════════════════════════════
-  // SHEET 3 — TAREFAS DETAIL
-  // ════════════════════════════════════════════════════════════════
-  addSheet('Tarefas', (data, merges, rh, cw) => {
-    cw.push(...[{wch:12},{wch:18},{wch:65},{wch:12}]);
-    data.push([sc('TAREFAS A EXECUTAR — '+(est.id||''), C.darkBlue, C.white, true, 12, false, 'left'), blank(C.darkBlue), blank(C.darkBlue), blank(C.darkBlue)]);
-    merges.push({s:{r:0,c:0}, e:{r:0,c:3}}); rh.push({hpt:26});
-    data.push(['Ref. MTMQ','Categoria','Descrição','Urgência'].map(h => sc(h, C.medBlue, C.white, true, 10, false, 'center')));
-    rh.push({hpt:24});
-    (currentResult.tarefas||[]).forEach((t,i) => {
-      const urgBg = t.urgencia==='alta'?C.red:t.urgencia==='media'?C.yellow:C.green;
-      const urgFg = t.urgencia==='alta'?C.redFg:t.urgencia==='media'?C.yellowFg:C.greenFg;
-      const bg    = i%2===0?C.grey:C.white;
-      data.push([
-        sc(t.ref_mtmq||'—', bg, C.orange, true, 10, false, 'center'),
-        sc(t.categoria||'—', bg, C.black, false, 10, false, 'left'),
-        sc(t.descricao||'—', bg, C.black, false, 10, true, 'left'),
-        sc((t.urgencia||'—').toUpperCase(), urgBg, urgFg, true, 9, false, 'center'),
-      ]);
-      rh.push({hpt:20});
-    });
-    data.push([sc('Pingos Service · '+today, C.darkBlue, C.white, false, 9, false, 'left'), blank(C.darkBlue), blank(C.darkBlue), blank(C.darkBlue)]);
-    merges.push({s:{r:data.length-1,c:0}, e:{r:data.length-1,c:3}}); rh.push({hpt:16});
-  });
-
-  // ── Add logo image to sheet (via sheet props hack) ─────────────
-  // XLSX.js doesn't support images natively, but we embed logo as drawing note
-  // We'll add a text-based logo header instead using the orange/dark color scheme
-
-  const fname = 'VT_Necessidades_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
-
-  // Write with cellStyles enabled
-  try {
-    XLSX.writeFile(wb, fname, { cellStyles: true });
-  } catch(e) {
-    // fallback without styles
-    XLSX.writeFile(wb, fname);
+  function stockStyle(stock, qty) {
+    if (stock===null||stock===undefined) return ["#f8f9fa","#6c757d","—"];
+    if (stock===0)    return ["#fde8e8","#c0392b","⚠ Sem stock"];
+    if (stock<qty)    return ["#fef9e7","#e67e22","⚠ Stock baixo"];
+    return ["#eafaf1","#27ae60","✔ Disponível"];
   }
+
+  let materiaisHTML = "";
+  const groupKeys = famOrder.filter(k => groups[k] && groups[k].length);
+  if (groups["Outro"] && groups["Outro"].length) groupKeys.push("Outro");
+
+  groupKeys.forEach(fam => {
+    const items = groups[fam];
+    const label = famLabel[fam] || fam;
+    materiaisHTML += `
+    <div style="margin-bottom:24px">
+      <div style="background:#ed7d31;color:#fff;font-family:Arial,sans-serif;font-size:11px;font-weight:700;
+                  letter-spacing:2px;text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0">
+        ▌ ${label} (${items.length})
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
+        <thead>
+          <tr style="background:#2e75b6;color:#fff">
+            <th style="padding:7px 10px;text-align:center;width:40px">#</th>
+            <th style="padding:7px 10px;text-align:center;width:90px">Ref. PHC</th>
+            <th style="padding:7px 10px;text-align:center;width:85px">Ref. MTMQ</th>
+            <th style="padding:7px 10px;text-align:left">Designação</th>
+            <th style="padding:7px 10px;text-align:center;width:40px">Un</th>
+            <th style="padding:7px 10px;text-align:center;width:45px">Qtd.</th>
+            <th style="padding:7px 10px;text-align:center;width:55px">Stock</th>
+            <th style="padding:7px 10px;text-align:center;width:110px">Estado</th>
+          </tr>
+        </thead>
+        <tbody>`;
+    items.forEach((m, i) => {
+      const qty = typeof m.quantidade==="number" ? m.quantidade : parseFloat(m.quantidade)||0;
+      const [bg, fg, stLbl] = stockStyle(m.stock, qty);
+      const rowBg = i%2===0 ? "#f8f9fa" : "#ffffff";
+      materiaisHTML += `
+          <tr style="background:${rowBg}">
+            <td style="padding:6px 10px;text-align:center;color:#6c757d">${i+1}</td>
+            <td style="padding:6px 10px;text-align:center;color:#1a5276;font-weight:600;font-family:monospace">${m.ref_artigo||"—"}</td>
+            <td style="padding:6px 10px;text-align:center;color:#e67e22;font-family:monospace;font-size:10px">${m.ref_mtmq||"—"}</td>
+            <td style="padding:6px 10px;color:#212529">${m.nome_artigo||m.descricao_tecnica||"—"}</td>
+            <td style="padding:6px 10px;text-align:center;color:#6c757d">${m.unidade||"un"}</td>
+            <td style="padding:6px 10px;text-align:center;font-weight:700">${Number.isInteger(qty)?qty:qty.toFixed(2)}</td>
+            <td style="padding:6px 10px;text-align:center;background:${bg};color:${fg};font-weight:600">${m.stock!==null&&m.stock!==undefined?m.stock:"—"}</td>
+            <td style="padding:6px 10px;text-align:center;background:${bg};color:${fg};font-size:10px;font-weight:700">${stLbl}</td>
+          </tr>`;
+    });
+    materiaisHTML += `</tbody></table></div>`;
+  });
+
+  // Tarefas rows
+  let tarefasHTML = "";
+  (currentResult.tarefas||[]).forEach((t,i) => {
+    const urgBg  = t.urgencia==="alta" ? "#fde8e8" : t.urgencia==="media" ? "#fef9e7" : "#eafaf1";
+    const urgFg  = t.urgencia==="alta" ? "#c0392b" : t.urgencia==="media" ? "#e67e22" : "#27ae60";
+    const urgLbl = t.urgencia==="alta" ? "🔴 ALTA"  : t.urgencia==="media" ? "🟡 MÉDIA" : "🟢 BAIXA";
+    const bg     = i%2===0 ? "#f8f9fa" : "#ffffff";
+    tarefasHTML += `
+      <tr style="background:${bg}">
+        <td style="padding:7px 12px;color:#e67e22;font-family:monospace;font-weight:700;font-size:11px">${t.ref_mtmq||"—"}</td>
+        <td style="padding:7px 12px;color:#6c757d;font-size:11px">${t.categoria||"—"}</td>
+        <td style="padding:7px 12px;color:#212529;font-size:12px">${t.descricao||"—"}</td>
+        <td style="padding:7px 12px;text-align:center;background:${urgBg};color:${urgFg};font-weight:700;font-size:11px">${urgLbl}</td>
+      </tr>`;
+  });
+
+  // Planning rows
+  let planHTML = "";
+  (currentResult.planeamento||[]).forEach((d,i) => {
+    const bg = i%2===0 ? "#f8f9fa" : "#ffffff";
+    const tasks = Array.isArray(d.tarefas) ? d.tarefas.join(" · ") : (d.tarefas||"");
+    planHTML += `
+      <tr style="background:${bg}">
+        <td style="padding:10px 14px;text-align:center;color:#1f3864;font-weight:700;font-size:14px">Dia ${d.dia}</td>
+        <td style="padding:10px 14px;color:#212529;font-size:12px">${tasks}</td>
+        <td style="padding:10px 14px;text-align:center;color:#2e75b6;font-weight:700;font-size:13px">${d.horas||"—"}</td>
+      </tr>`;
+  });
+
+  // Alerts
+  const stockZero = allNeeds.filter(m=>m.stock===0);
+  let alertsHTML = "";
+  [...stockZero.map(m=>({tipo:"stock_zero", descricao:`${m.ref_artigo||"—"} — ${m.nome_artigo||m.descricao_tecnica||"—"} (necessário: ${m.quantidade} ${m.unidade||"un"})`})),
+   ...(currentResult.alertas||[])].forEach(a => {
+    const bg = a.tipo==="stock_zero" ? "#fde8e8" : "#fef9e7";
+    const fg = a.tipo==="stock_zero" ? "#c0392b" : "#e67e22";
+    const icon = a.tipo==="stock_zero" ? "🚫" : "⚠️";
+    alertsHTML += `<div style="background:${bg};border-left:4px solid ${fg};padding:10px 14px;margin-bottom:8px;border-radius:0 4px 4px 0;font-family:Arial,sans-serif;font-size:12px;color:${fg}">${icon} ${a.descricao}</div>`;
+  });
+
+  const reportHTML = `<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<title>Relatório Necessidades — ${est.id||"Obra"}</title>
+<style>
+  @page { size: A4; margin: 15mm 12mm; }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #212529; background: #fff; }
+  .page-break { page-break-before: always; }
+  table { border-collapse: collapse; }
+  th, td { border: 0.5px solid #dee2e6; }
+  @media print {
+    .no-print { display: none !important; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ PRINT BUTTON (hidden on print) ═══════════ -->
+<div class="no-print" style="position:fixed;top:12px;right:12px;z-index:999;display:flex;gap:8px">
+  <button onclick="window.print()" style="padding:10px 22px;background:#ed7d31;color:#fff;border:none;border-radius:4px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)">
+    🖨 Imprimir / Guardar PDF
+  </button>
+  <button onclick="window.close()" style="padding:10px 16px;background:#6c757d;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer">
+    ✕ Fechar
+  </button>
+</div>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<table style="width:100%;margin-bottom:0;border:none">
+  <tr>
+    <td style="border:none;padding:0;width:220px;vertical-align:middle">
+      <img src="data:image/jpeg;base64,${LOGO_B64}" style="height:60px;width:auto;display:block" alt="Pingos Service"/>
+    </td>
+    <td style="border:none;padding:0;vertical-align:middle;text-align:right">
+      <div style="font-size:9px;color:#6c757d;font-family:Arial,sans-serif">
+        Building Your Communications<br>
+        <strong style="color:#1f3864">Vantage Towers O&amp;M</strong> · Gerado em ${today}
+      </div>
+    </td>
+  </tr>
+</table>
+
+<div style="background:#1f3864;color:#fff;padding:12px 16px;margin:8px 0 0 0;border-radius:3px 3px 0 0">
+  <div style="font-size:16px;font-weight:700;letter-spacing:0.5px">LEVANTAMENTO DE NECESSIDADES</div>
+  <div style="font-size:13px;margin-top:3px;opacity:0.9">${est.id||""}</div>
+</div>
+<div style="background:#2e75b6;color:#fff;padding:7px 16px;font-size:10px;margin-bottom:16px;border-radius:0 0 3px 3px">
+  ${est.torre_tipo||"Torre"}${est.torre_altura?" · "+est.torre_altura:""} &nbsp;|&nbsp;
+  Inspeção ISQ: ${est.data_inspecao||"—"} &nbsp;|&nbsp;
+  <strong style="background:${priorColor};padding:1px 8px;border-radius:2px">${priorLabel}</strong>
+  &nbsp;|&nbsp; ${est.morada||est.local||""}
+</div>
+
+<!-- ═══════════ INFO CARDS ═══════════ -->
+<table style="width:100%;border:none;margin-bottom:16px">
+  <tr>
+    <td style="border:none;padding:0;width:33%;vertical-align:top">
+      <div style="background:#f0f4f8;border-left:4px solid #1f3864;padding:10px 12px;margin-right:6px;border-radius:0 4px 4px 0">
+        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Dias Estimados</div>
+        <div style="font-size:22px;font-weight:700;color:#1f3864">${currentResult.dias_estimados||"—"}</div>
+        <div style="font-size:10px;color:#6c757d">dias úteis</div>
+      </div>
+    </td>
+    <td style="border:none;padding:0;width:33%;vertical-align:top">
+      <div style="background:#f0f4f8;border-left:4px solid #ed7d31;padding:10px 12px;margin-right:6px;border-radius:0 4px 4px 0">
+        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Total Artigos</div>
+        <div style="font-size:22px;font-weight:700;color:#ed7d31">${allNeeds.length}</div>
+        <div style="font-size:10px;color:#6c757d">necessidades identificadas</div>
+      </div>
+    </td>
+    <td style="border:none;padding:0;width:33%;vertical-align:top">
+      <div style="background:#fde8e8;border-left:4px solid #c0392b;padding:10px 12px;border-radius:0 4px 4px 0">
+        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Sem Stock</div>
+        <div style="font-size:22px;font-weight:700;color:#c0392b">${allNeeds.filter(m=>m.stock===0).length}</div>
+        <div style="font-size:10px;color:#c0392b">artigos a encomendar</div>
+      </div>
+    </td>
+  </tr>
+</table>
+
+<!-- ═══════════ MATERIAIS ═══════════ -->
+${materiaisHTML}
+
+<!-- ═══════════ PAGE 2: TAREFAS + PLANEAMENTO ═══════════ -->
+<div class="page-break"></div>
+
+<!-- Header repetido -->
+<table style="width:100%;margin-bottom:0;border:none">
+  <tr>
+    <td style="border:none;padding:0;width:220px">
+      <img src="data:image/jpeg;base64,${LOGO_B64}" style="height:50px;width:auto" alt="Pingos Service"/>
+    </td>
+    <td style="border:none;padding:0;text-align:right;vertical-align:middle">
+      <div style="font-size:10px;color:#1f3864;font-weight:700">${est.id||""} · ${today}</div>
+    </td>
+  </tr>
+</table>
+<div style="height:2px;background:linear-gradient(90deg,#1f3864,#ed7d31);margin:6px 0 16px 0"></div>
+
+<!-- Tarefas -->
+<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
+            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0;margin-bottom:0">
+  ▌ TAREFAS A EXECUTAR (${(currentResult.tarefas||[]).length})
+</div>
+<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:20px">
+  <thead>
+    <tr style="background:#2e75b6;color:#fff">
+      <th style="padding:7px 10px;width:70px;text-align:center">Ref. MTMQ</th>
+      <th style="padding:7px 10px;width:110px;text-align:left">Categoria</th>
+      <th style="padding:7px 10px;text-align:left">Descrição</th>
+      <th style="padding:7px 10px;width:70px;text-align:center">Urgência</th>
+    </tr>
+  </thead>
+  <tbody>${tarefasHTML}</tbody>
+</table>
+
+<!-- Planeamento -->
+<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
+            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0">
+  ▌ PLANEAMENTO — ${currentResult.dias_estimados||"?"} DIA(S) ÚTIL(IS)
+</div>
+<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+  <thead>
+    <tr style="background:#2e75b6;color:#fff">
+      <th style="padding:8px 14px;width:80px;text-align:center;font-size:11px">Dia</th>
+      <th style="padding:8px 14px;text-align:left;font-size:11px">Tarefas</th>
+      <th style="padding:8px 14px;width:80px;text-align:center;font-size:11px">Duração</th>
+    </tr>
+  </thead>
+  <tbody>${planHTML}</tbody>
+</table>
+
+${alertsHTML ? `
+<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
+            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0;margin-top:8px">
+  ▌ ALERTAS (${stockZero.length+(currentResult.alertas||[]).length})
+</div>
+<div style="padding:12px 0">${alertsHTML}</div>` : ""}
+
+<!-- Footer -->
+<div style="background:#1f3864;color:#fff;padding:10px 16px;margin-top:20px;border-radius:3px;
+            font-family:Arial,sans-serif;font-size:9px;display:flex;justify-content:space-between">
+  <span>Pingos Service · Building Your Communications</span>
+  <span>Documento gerado automaticamente · ${today}</span>
+</div>
+
+</body>
+</html>`;
+
+  // Open in new window for print/save as PDF
+  const win = window.open('', '_blank', 'width=900,height=800');
+  win.document.write(reportHTML);
+  win.document.close();
 }
 
 // ══════════════════════════════════════════════════════════════════════════
