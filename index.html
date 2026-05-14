@@ -1207,7 +1207,7 @@ function renderNeeds(materials) {
 }
 
 function renderNeedsFiltered() {
-  const search = (document.getElementById("searchNeeds") || {}).value || "";
+  const _sEl = document.getElementById("searchNeeds"); const search = _sEl ? _sEl.value : "";
   const filtered = allNeeds.filter(m => {
     const matchFilter =
       activeFilter === "all" ? true :
@@ -1378,8 +1378,8 @@ async function analyse() {
     setStep(4, "done");
     document.getElementById("progressBar").style.width = "100%";
 
-    document.getElementById("btnDlJson").disabled = false;
-    document.getElementById("btnDlXls").disabled = false;
+    const _dlBtn = document.getElementById("btnDlXls");
+    if (_dlBtn) _dlBtn.disabled = false;
 
     switchTab("tasks");
 
@@ -1911,14 +1911,19 @@ async function handleFile(file) {
 }
 
 // ── API KEY PERSISTENCE ──────────────────────────────────────────────────
+// ── HARDCODED KEY (edit this line to pre-configure the app) ──────────────
+const HARDCODED_API_KEY      = '';   // e.g. 'sk-ant-api03-...'
+const HARDCODED_API_PROVIDER = '';   // 'anthropic' or 'gemini'
+// ─────────────────────────────────────────────────────────────────────────
 (function() {
-  const saved = localStorage.getItem('vt_api_key');
-  const savedProvider = localStorage.getItem('vt_provider') || 'anthropic';
-  if (saved) {
-    document.getElementById('geminiKey').value = saved;
+  const saved    = localStorage.getItem('vt_api_key');
+  const savedProv = localStorage.getItem('vt_provider') || HARDCODED_API_PROVIDER || 'anthropic';
+  const key      = saved || HARDCODED_API_KEY;
+  if (key) {
+    document.getElementById('geminiKey').value = key;
     validateKey(document.getElementById('geminiKey'));
   }
-  setProvider(savedProvider);
+  setProvider(savedProv);
 })();
 
 document.getElementById('geminiKey').addEventListener('input', function() {
