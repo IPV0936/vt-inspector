@@ -1611,31 +1611,52 @@ function downloadExcel() {
 
   // Tarefas
   rows += '<Row ss:Height="8"><Cell/></Row>';
-  rows += sectionRow('TAREFAS ('+(currentResult.tarefas||[]).length+')', 4);
-  rows += hdrRow([['Ref. MTMQ',70],['Categoria',110],['Descrição',0],['Urgência',70]]);
+  rows += sectionRow('TAREFAS ('+(currentResult.tarefas||[]).length+')', COLS);
+  rows += hdrRow([
+      ['Ref. MTMQ',70],['Categoria',110],['',0],['Descrição',0],
+      ['',''],['',''],['',''],['Urgência',90],['',''],['','']
+    ]);
   (currentResult.tarefas||[]).forEach((t,i) => {
     const [ubg,ufg] = t.urgencia==='alta'?[C.red,C.redFg]:t.urgencia==='media'?[C.yellow,C.yellowFg]:[C.green,C.greenFg];
     const uLbl = t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
     const bg = i%2===0?C.grey:C.white;
+    // 10-col: A=Ref.MTMQ, B=Categoria, C=blank, D=Descrição, E-G=blank, H=Urgência, I-J=blank
     rows += '<Row ss:Height="20">' +
-      c(t.ref_mtmq||'—', bg, '#E67E22', true,  10, false, 'Center') +
-      c(t.categoria||'—', bg, C.muted,  false, 10, false, 'Left') +
-      c(t.descricao||'—', bg, C.black,  false, 10, true,  'Left') +
-      c(uLbl,             ubg, ufg,     true,   9, false, 'Center') +
+      c(t.ref_mtmq||'—',  bg,  '#E67E22', true,  10, false, 'Center') +
+      c(t.categoria||'—', bg,  C.muted,  false, 10, false, 'Left') +
+      c('',               bg,  C.muted,  false,  9, false, 'Left') +
+      c(t.descricao||'—', bg,  C.black,  false, 10, true,  'Left') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c(uLbl,             ubg, ufg,      true,   9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
       '</Row>';
   });
 
   // Planeamento
   rows += '<Row ss:Height="8"><Cell/></Row>';
-  rows += sectionRow('PLANEAMENTO', 3);
-  rows += hdrRow([['Dia',60],['Tarefas',0],['Duração',70]]);
+  rows += sectionRow('PLANEAMENTO', COLS);
+  rows += hdrRow([
+      ['Dia',70],['',''],['',''],['Tarefas',0],
+      ['',''],['',''],['',''],['Duração',90],['',''],['','']
+    ]);
   (currentResult.planeamento||[]).forEach((d,i) => {
     const tasks = Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
     const bg = i%2===0?C.grey:C.white;
+    // 10-col: A-C=blank, D=Tarefas, E-G=blank, H=Duração, I-J=blank
     rows += '<Row ss:Height="28">' +
-      c('Dia '+d.dia, bg, C.darkBlue, true,  12, false, 'Center') +
+      c('Dia '+d.dia, bg, C.darkBlue, true,  11, false, 'Center') +
+      c('',           bg, C.muted,    false,  9, false, 'Center') +
+      c('',           bg, C.muted,    false,  9, false, 'Center') +
       c(tasks,        bg, C.black,    false, 10, true,  'Left') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
       c(d.horas||'—', bg, C.medBlue,  true,  11, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
+      c('', bg, C.muted, false, 9, false, 'Center') +
       '</Row>';
   });
 
@@ -1677,6 +1698,8 @@ ${rows}
 }
 
 function downloadReport() {
+  if (!currentResult) return;
+
   if (!currentResult) return;
   const est     = currentResult.estacao || {};
   const today   = new Date().toLocaleDateString("pt-PT");
@@ -1937,18 +1960,20 @@ ${alertsHTML ? `
 </body>
 </html>`;
 
-  // Create blob and open in new tab (works in Electron + all browsers)
+
+  // Build blob and always download (works in Electron + all browsers, no popup needed)
   const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
-  const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, '_blank');
-  if (!win) {
-    // Fallback: download as HTML file if popup blocked
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'VT_Relatorio_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.html';
-    a.click();
-  }
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  const fname = 'VT_Relatorio_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.html';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+
+  // Also try to open in new tab as bonus (may work in browser but not Electron)
+  try { window.open(a.href, '_blank'); } catch(e) {}
 }
 
 
