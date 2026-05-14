@@ -87,6 +87,8 @@
     display: grid;
     grid-template-columns: 380px 1fr;
     height: calc(100vh - 60px);
+    min-height: 0;
+    overflow: hidden;
   }
 
   /* ── LEFT PANEL ── */
@@ -95,10 +97,11 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow-y: scroll !important;
     overflow-x: hidden;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+    min-height: 0;
   }
 
   .panel-header {
@@ -1476,80 +1479,109 @@ function downloadExcel() {
   const today = new Date().toLocaleDateString('pt-PT');
   const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
 
-  // Use XML Spreadsheet 2003 format - full color support in Excel without any lib
+  // Exact colours from example file
   const C = {
-    darkBlue: '#1F3864', medBlue: '#2E75B6', orange: '#ED7D31',
-    white: '#FFFFFF', grey: '#F2F2F2', lightBlue: '#D6E4F0',
-    red: '#FFC7CE', redFg: '#9C0006',
-    green: '#C6EFCE', greenFg: '#276221',
-    yellow: '#FFEB9C', yellowFg: '#9C6500',
-    muted: '#6B7280', black: '#000000'
+    darkBlue:'#1F3864', medBlue:'#2E75B6', orange:'#ED7D31',
+    white:'#FFFFFF', grey:'#F2F2F2', black:'#000000',
+    muted:'#6C757D', blue1:'#1A5276', blue2:'#E67E22',
+    red:'#FDE8E8',   redFg:'#C0392B',
+    green:'#EAFAF1', greenFg:'#27AE60',
+    yellow:'#FEF9E7',yellowFg:'#E67E22',
+    noref:'#F8F9FA', norefFg:'#6C757D',
+    darkBlueTx:'#1F3864', medBlueTx:'#2E75B6'
   };
 
-  function hexToExcel(hex) {
-    return hex.replace('#','');
-  }
+  // Column widths matching example (in pts): A=10,B=9,C=22,D=78,E=5,F=6,G=5,H=13,I=9,J=22
+  // Convert: Excel char width ≈ pts * 7
+  const COL_W_PTS = [55,50,120,430,28,36,32,72,50,125];
 
-  function cell(val, bgHex, fgHex, bold, sz, wrapText, hAlign) {
-    const bg  = hexToExcel(bgHex  || C.white);
-    const fg  = hexToExcel(fgHex  || C.black);
-    const ha  = hAlign || 'Left';
-    const b   = bold ? '1' : '0';
-    const s   = sz || 10;
-    const w   = wrapText ? '1' : '0';
-    const v   = String(val ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const num = typeof val === 'number';
-    return `<Cell ss:StyleID="s${bg}_${fg}_${b}_${s}_${w}_${ha}">` +
-           `<Data ss:Type="${num?'Number':'String'}">${v}</Data></Cell>`;
-  }
-
-  // Collect all unique styles
   const styleMap = {};
-  function regStyle(bgHex, fgHex, bold, sz, wrap, ha) {
-    const bg = hexToExcel(bgHex||C.white);
-    const fg = hexToExcel(fgHex||C.black);
-    const b  = bold?'1':'0';
-    const s  = sz||10;
-    const w  = wrap?'1':'0';
-    const h  = ha||'Left';
-    const id = `s${bg}_${fg}_${b}_${s}_${w}_${h}`;
-    if (!styleMap[id]) {
-      styleMap[id] = `<Style ss:ID="${id}">
-        <Alignment ss:Horizontal="${h}" ss:Vertical="Center" ss:WrapText="${w}"/>
-        <Borders>
-          <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
-          <Border ss:Position="Left"   ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
-          <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
-          <Border ss:Position="Top"    ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
-        </Borders>
-        <Font ss:FontName="Arial" ss:Size="${s}" ss:Bold="${b}" ss:Color="#${fg}"/>
-        <Interior ss:Color="#${bg}" ss:Pattern="Solid"/>
-      </Style>`;
-    }
+  function S(bg,fg,bold,sz,wrap,ha) {
+    const b=bold?1:0, s=sz||11, w=wrap?1:0, h=ha||'Left';
+    const bg2=(bg||'#FFFFFF').replace('#','');
+    const fg2=(fg||'#000000').replace('#','');
+    const id=`_${bg2}_${fg2}_${b}_${s}_${w}_${h}`;
+    if(!styleMap[id]) styleMap[id]=`<Style ss:ID="${id}">
+      <Alignment ss:Horizontal="${h}" ss:Vertical="Center" ss:WrapText="${w}"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+        <Border ss:Position="Left"   ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+        <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+        <Border ss:Position="Top"    ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+      </Borders>
+      <Font ss:FontName="Arial" ss:Size="${s}" ss:Bold="${b}" ss:Color="#${fg2}"/>
+      <Interior ss:Color="#${bg2}" ss:Pattern="Solid"/>
+    </Style>`;
     return id;
   }
 
-  function c(val, bg, fg, bold, sz, wrap, ha) {
-    regStyle(bg||C.white, fg||C.black, bold, sz||10, wrap, ha||'Left');
-    return cell(val, bg||C.white, fg||C.black, bold, sz||10, wrap, ha||'Left');
+  function C1(val,bg,fg,bold,sz,wrap,ha,merge) {
+    S(bg,fg,bold,sz,wrap,ha);
+    const bg2=(bg||'#FFFFFF').replace('#','');
+    const fg2=(fg||'#000000').replace('#','');
+    const b=bold?1:0, s=sz||11, w=wrap?1:0, h=ha||'Left';
+    const t=typeof val==='number'?'Number':'String';
+    const v=String(val??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const ma=merge&&merge>1?` ss:MergeAcross="${merge-1}"`:'';
+    return `<Cell ss:StyleID="_${bg2}_${fg2}_${b}_${s}_${w}_${h}"${ma}><Data ss:Type="${t}">${v}</Data></Cell>`;
   }
-  function mc(val, bg, fg, bold, sz, span) {
-    regStyle(bg||C.white, fg||C.black, bold, sz||10, false, 'Left');
-    const b = bold?'1':'0'; const s = sz||10;
-    const bg2 = hexToExcel(bg||C.white); const fg2 = hexToExcel(fg||C.black);
-    const v = String(val ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<Cell ss:StyleID="s${bg2}_${fg2}_${b}_${s}_0_Left" ss:MergeAcross="${span-1}">` +
-           `<Data ss:Type="String">${v}</Data></Cell>` +
-           Array(span-1).fill('<Cell ss:StyleID="s'+bg2+'_'+fg2+'_'+b+'_'+s+'_0_Left"><Data ss:Type="String"></Data></Cell>').join('');
+  function B(bg) { return C1('',bg||C.white,C.black,false,11,false,'Left'); }
+
+  // Full-width merged row (10 cols)
+  function fullRow(val,bg,fg,bold,sz,h) {
+    return `<Row ss:Height="${(sz||11)+6}">`+
+      C1(val,bg,fg,bold,sz||11,true,h||'Left',10)+
+      Array(9).fill(B(bg)).join('')+
+      `</Row>`;
   }
 
-  function sectionRow(label, cols) {
-    return '<Row ss:Height="22">' + mc('▌ '+label, C.orange, C.white, true, 11, cols) + '</Row>';
+  // Section header (orange)
+  function section(label) {
+    return `<Row ss:Height="18">`+
+      C1('▌ '+label,C.orange,C.white,true,11,true,'Left',10)+
+      Array(9).fill(B(C.orange)).join('')+
+      `</Row>`;
   }
-  function hdrRow(hdrs) {
-    return '<Row ss:Height="24">' + hdrs.map(([v,w]) =>
-      c(v, C.medBlue, C.white, true, 10, true, 'Center') + (w?`<!-- w${w} -->`:'')
-    ).join('') + '</Row>';
+
+  // Standard 10-col needs header matching example
+  function hdrNeeds() {
+    const cols=[['#',C.white,'Center'],['Ref. PHC',C.white,'Center'],['Ref. MTMQ',C.white,'Center'],
+                ['Designação',C.white,'Center'],['Un',C.white,'Center'],['Qtd.',C.white,'Center'],
+                ['Stock',C.white,'Center'],['Estado',C.white,'Center'],['Armazém',C.white,'Center'],
+                ['Observações',C.white,'Center']];
+    return '<Row ss:Height="16">'+cols.map(([v,,ha])=>C1(v,C.medBlue,C.white,true,9,true,ha)).join('')+'</Row>';
+  }
+
+  // Tarefas header: A=Ref.MTMQ, B=blank, C=Categoria, D=Descrição, E-G=blank, H=Urgência, I-J=blank
+  function hdrTarefas() {
+    return '<Row ss:Height="16">'+
+      C1('Ref. MTMQ',C.medBlue,C.white,true,9,false,'Center')+  // A
+      B(C.medBlue)+                                               // B
+      C1('Categoria', C.medBlue,C.white,true,9,false,'Left')+    // C
+      C1('Descrição', C.medBlue,C.white,true,9,false,'Left')+    // D
+      B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+                    // E F G
+      C1('Urgência',  C.medBlue,C.white,true,9,false,'Center')+  // H
+      B(C.medBlue)+B(C.medBlue)+                                  // I J
+    '</Row>';
+  }
+
+  // Planeamento header: A=Dia, B-C=blank, D=Tarefas, E-G=blank, H=Duração, I-J=blank
+  function hdrPlan() {
+    return '<Row ss:Height="16">'+
+      C1('Dia',     C.medBlue,C.white,true,9,false,'Center')+    // A
+      B(C.medBlue)+B(C.medBlue)+                                  // B C
+      C1('Tarefas', C.medBlue,C.white,true,9,false,'Left')+      // D
+      B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+                    // E F G
+      C1('Duração', C.medBlue,C.white,true,9,false,'Center')+    // H
+      B(C.medBlue)+B(C.medBlue)+                                  // I J
+    '</Row>';
+  }
+
+  function stockInfo(stock,qty) {
+    if(stock===null||stock===undefined) return [C.noref,C.norefFg,'—'];
+    if(stock===0)    return [C.red,    C.redFg,    '⚠ Sem stock'];
+    if(stock<qty)    return [C.yellow, C.yellowFg, '⚠ Stock baixo'];
+    return [C.green, C.greenFg, '✔ Disponível'];
   }
 
   const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
@@ -1558,132 +1590,100 @@ function downloadExcel() {
   const groups = {};
   allNeeds.forEach(m => {
     const g = famOrder.includes(m.familia)?m.familia:'Outro';
-    if (!groups[g]) groups[g]=[]; groups[g].push(m);
+    if(!groups[g]) groups[g]=[]; groups[g].push(m);
   });
 
-  function stockBg(stock, qty) {
-    if (stock===null||stock===undefined) return [C.grey, C.muted, '—'];
-    if (stock===0)    return [C.red,    C.redFg,    '⚠ Sem stock'];
-    if (stock<qty)    return [C.yellow, C.yellowFg, '⚠ Stock baixo'];
-    return [C.green, C.greenFg, '✔ Disponível'];
-  }
-
-  const COLS = 10;
   let rows = '';
 
-  // Title rows
-  rows += '<Row ss:Height="28">' + mc('LEVANTAMENTO DE NECESSIDADES — '+(est.id||''), C.darkBlue, C.white, true, 13, COLS) + '</Row>';
-  rows += '<Row ss:Height="18">' + mc(
+  // ── TITLE ROWS (merged A:J) ──
+  rows += fullRow('LEVANTAMENTO DE NECESSIDADES — '+(est.id||''), C.darkBlue, C.white, true, 12);
+  rows += fullRow(
     (est.torre_tipo||'Torre')+(est.torre_altura?' · '+est.torre_altura:'')+
-    '  |  Inspeção: '+(est.data_inspecao||'—')+
-    '  |  '+priorLabel+'  |  '+(est.morada||est.local||'')+
-    '  |  Exportado: '+today,
-    C.medBlue, C.white, false, 9, COLS) + '</Row>';
-  rows += '<Row ss:Height="8"><Cell/></Row>';
+    '  |  Inspeção: '+(est.data_inspecao||'—')+'  |  '+priorLabel+
+    '  |  '+(est.morada||est.local||''), C.medBlue, C.white, true, 9);
+  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
 
+  // ── NECESSIDADES GROUPS ──
   const groupKeys = famOrder.filter(k=>groups[k]&&groups[k].length);
-  if (groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
+  if(groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
 
   groupKeys.forEach(fam => {
     const items = groups[fam];
-    rows += sectionRow((famLabel[fam]||fam)+' ('+items.length+')', COLS);
-    rows += hdrRow([['#',40],['Ref. PHC',90],['Ref. MTMQ',80],['Designação',0],['Un',35],['Qtd.',40],['Stock',55],['Estado',90],['Armazém',55],['Observações',0]]);
+    rows += section((famLabel[fam]||fam)+' ('+items.length+')');
+    rows += hdrNeeds();
     items.forEach((m,i) => {
       const qty = typeof m.quantidade==='number'?(Number.isInteger(m.quantidade)?m.quantidade:parseFloat(m.quantidade.toFixed(2))):m.quantidade;
-      const [sbg,sfg,stl] = stockBg(m.stock, m.quantidade);
-      const rowBg = i%2===0?C.grey:C.white;
+      const [sbg,sfg,stl] = stockInfo(m.stock, m.quantidade);
+      const bg = i%2===0?C.grey:C.white;
       const arm = m.ref_artigo&&m.ref_artigo!=='—'?getArmazem(m.ref_artigo):'—';
-      rows += '<Row ss:Height="18">' +
-        c(i+1,           rowBg, C.muted,  false, 10, false, 'Center') +
-        c(m.ref_artigo||'—', rowBg, '#1A5276', true,  10, false, 'Center') +
-        c(m.ref_mtmq||'—',   rowBg, '#E67E22', false,  9, false, 'Center') +
-        c(m.nome_artigo||m.descricao_tecnica||'—', rowBg, C.black, false, 10, true,  'Left') +
-        c(m.unidade||'un',   rowBg, C.muted,  false, 10, false, 'Center') +
-        c(qty,               rowBg, C.black,  true,  10, false, 'Center') +
-        c(m.stock!==null&&m.stock!==undefined?m.stock:'—', sbg, sfg, true, 10, false, 'Center') +
-        c(stl,               sbg,   sfg,     true,   9, false, 'Center') +
-        c(arm,               rowBg, C.darkBlue, true, 10, false, 'Center') +
-        c(m.notas||'',       rowBg, C.muted,  false,  9, true,  'Left') +
-        '</Row>';
+      rows += '<Row ss:Height="28.5">'+
+        C1(i+1,                          bg,  C.muted,  false,11,true,'Center')+  // A #
+        C1(m.ref_artigo||'—',            bg,  C.blue1,  true, 11,true,'Center')+  // B RefPHC
+        C1(m.ref_mtmq||'—',              bg,  C.blue2,  false, 9,true,'Center')+  // C RefMTMQ
+        C1(m.nome_artigo||m.descricao_tecnica||'—',bg,C.black,false,11,true,'Left')+ // D Designação
+        C1(m.unidade||'un',              bg,  C.muted,  false,11,true,'Center')+  // E Un
+        C1(qty,                          bg,  C.black,  true, 11,true,'Center')+  // F Qtd
+        C1(m.stock!==null&&m.stock!==undefined?m.stock:'—',sbg,sfg,true,11,true,'Center')+ // G Stock
+        C1(stl,                          sbg, sfg,      true,  9,true,'Center')+  // H Estado
+        C1(arm,                          bg,  C.darkBlueTx,true,11,true,'Center')+ // I Armazém
+        C1(m.notas||'',                  bg,  C.muted,  false, 9,true,'Left')+    // J Obs
+      '</Row>';
     });
-    rows += '<Row ss:Height="6"><Cell/></Row>';
+    rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
   });
 
-  // Tarefas
-  rows += '<Row ss:Height="8"><Cell/></Row>';
-  rows += sectionRow('TAREFAS ('+(currentResult.tarefas||[]).length+')', COLS);
-  rows += hdrRow([
-      ['Ref. MTMQ',70],['Categoria',110],['',0],['Descrição',0],
-      ['',''],['',''],['',''],['Urgência',90],['',''],['','']
-    ]);
+  // ── TAREFAS ──
+  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows += section('TAREFAS ('+(currentResult.tarefas||[]).length+')');
+  rows += hdrTarefas();
   (currentResult.tarefas||[]).forEach((t,i) => {
     const [ubg,ufg] = t.urgencia==='alta'?[C.red,C.redFg]:t.urgencia==='media'?[C.yellow,C.yellowFg]:[C.green,C.greenFg];
     const uLbl = t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
     const bg = i%2===0?C.grey:C.white;
-    // 10-col: A=Ref.MTMQ, B=Categoria, C=blank, D=Descrição, E-G=blank, H=Urgência, I-J=blank
-    rows += '<Row ss:Height="20">' +
-      c(t.ref_mtmq||'—',  bg,  '#E67E22', true,  10, false, 'Center') +
-      c(t.categoria||'—', bg,  C.muted,  false, 10, false, 'Left') +
-      c('',               bg,  C.muted,  false,  9, false, 'Left') +
-      c(t.descricao||'—', bg,  C.black,  false, 10, true,  'Left') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c(uLbl,             ubg, ufg,      true,   9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      '</Row>';
+    rows += '<Row ss:Height="28.5">'+
+      C1(t.ref_mtmq||'—',  bg, C.blue2, false, 9,true,'Center')+  // A Ref.MTMQ
+      B(bg)+                                                         // B blank
+      C1(t.categoria||'—', bg, C.muted, false,11,true,'Left')+     // C Categoria
+      C1(t.descricao||'—', bg, C.black, false,11,true,'Left')+     // D Descrição
+      B(bg)+B(bg)+B(bg)+                                             // E F G blank
+      C1(uLbl,             ubg,ufg,     true, 11,false,'Center')+  // H Urgência
+      B(bg)+B(bg)+                                                   // I J blank
+    '</Row>';
   });
 
-  // Planeamento
-  rows += '<Row ss:Height="8"><Cell/></Row>';
-  rows += sectionRow('PLANEAMENTO', COLS);
-  rows += hdrRow([
-      ['Dia',70],['',''],['',''],['Tarefas',0],
-      ['',''],['',''],['',''],['Duração',90],['',''],['','']
-    ]);
+  // ── PLANEAMENTO ──
+  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows += section('PLANEAMENTO — '+(currentResult.dias_estimados||'?')+' DIA(S)');
+  rows += hdrPlan();
   (currentResult.planeamento||[]).forEach((d,i) => {
     const tasks = Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
     const bg = i%2===0?C.grey:C.white;
-    // 10-col: A-C=blank, D=Tarefas, E-G=blank, H=Duração, I-J=blank
-    rows += '<Row ss:Height="28">' +
-      c('Dia '+d.dia, bg, C.darkBlue, true,  11, false, 'Center') +
-      c('',           bg, C.muted,    false,  9, false, 'Center') +
-      c('',           bg, C.muted,    false,  9, false, 'Center') +
-      c(tasks,        bg, C.black,    false, 10, true,  'Left') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c(d.horas||'—', bg, C.medBlue,  true,  11, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      c('', bg, C.muted, false, 9, false, 'Center') +
-      '</Row>';
+    rows += '<Row ss:Height="28.5">'+
+      C1('Dia '+d.dia, bg, C.darkBlueTx, true, 12,false,'Center')+  // A Dia
+      B(bg)+B(bg)+                                                    // B C blank
+      C1(tasks,        bg, C.black,      false,11,true, 'Left')+    // D Tarefas
+      B(bg)+B(bg)+B(bg)+                                             // E F G blank
+      C1(d.horas||'—', bg, C.medBlueTx,  true, 11,false,'Center')+ // H Duração
+      B(bg)+B(bg)+                                                   // I J blank
+    '</Row>';
   });
 
-  // Footer
-  rows += '<Row ss:Height="8"><Cell/></Row>';
-  rows += '<Row ss:Height="18">' + mc('Pingos Service · Building Your Communications · Gerado automaticamente em '+today, C.darkBlue, C.white, false, 9, COLS) + '</Row>';
+  // ── FOOTER ──
+  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows += fullRow('Pingos Service · Building Your Communications · Gerado automaticamente em '+today, C.darkBlue, C.white, false, 8);
 
-  // Build final XML
-  const styles = Object.values(styleMap).join('\n');
+  const colDefs = COL_W_PTS.map(w=>`<Column ss:Width="${w}"/>`).join('\n ');
+  const stylesDefs = Object.values(styleMap).join('\n');
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:x="urn:schemas-microsoft-com:office:excel">
-<Styles>${styles}</Styles>
+<Styles>${stylesDefs}</Styles>
 <Worksheet ss:Name="Necessidades">
-<Table ss:DefaultColumnWidth="80">
- <Column ss:Width="35"/>
- <Column ss:Width="90"/>
- <Column ss:Width="80"/>
- <Column ss:Width="260"/>
- <Column ss:Width="35"/>
- <Column ss:Width="40"/>
- <Column ss:Width="55"/>
- <Column ss:Width="90"/>
- <Column ss:Width="55"/>
- <Column ss:Width="180"/>
+<Table ss:DefaultColumnWidth="60">
+ ${colDefs}
 ${rows}
 </Table>
 </Worksheet>
@@ -1693,287 +1693,194 @@ ${rows}
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'VT_Necessidades_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xls';
+  document.body.appendChild(a);
   a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
 function downloadReport() {
   if (!currentResult) return;
+  const est      = currentResult.estacao || {};
+  const today    = new Date().toLocaleDateString('pt-PT');
+  const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
+  const priorColor = est.prioridade===1?'#c0392b':est.prioridade===2?'#e67e22':'#27ae60';
 
-  if (!currentResult) return;
-  const est     = currentResult.estacao || {};
-  const today   = new Date().toLocaleDateString("pt-PT");
-  const priorLabel = est.prioridade===1 ? "NÍVEL 1 – IMEDIATA" : est.prioridade===2 ? "NÍVEL 2 – ALTA" : "NÍVEL 3 – MÉDIA";
-  const priorColor = est.prioridade===1 ? "#c0392b" : est.prioridade===2 ? "#e67e22" : "#27ae60";
-
-  // Group materials by family
+  const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
+  const famLabel = {'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento',
+                    'MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
   const groups = {};
-  const famOrder = ["MATERIAL PROPRIO","EPIS/FARDAMENTO","MAQUINA","FERRAMENTA","SERVIÇOS"];
-  const famLabel = {"MATERIAL PROPRIO":"Materiais","EPIS/FARDAMENTO":"EPI / Fardamento","MAQUINA":"Máquinas","FERRAMENTA":"Ferramentas","SERVIÇOS":"Serviços"};
   allNeeds.forEach(m => {
-    const g = famOrder.includes(m.familia) ? m.familia : "Outro";
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(m);
+    const g = famOrder.includes(m.familia)?m.familia:'Outro';
+    if(!groups[g]) groups[g]=[]; groups[g].push(m);
   });
 
-  function stockStyle(stock, qty) {
-    if (stock===null||stock===undefined) return ["#f8f9fa","#6c757d","—"];
-    if (stock===0)    return ["#fde8e8","#c0392b","⚠ Sem stock"];
-    if (stock<qty)    return ["#fef9e7","#e67e22","⚠ Stock baixo"];
-    return ["#eafaf1","#27ae60","✔ Disponível"];
+  function sk(stock,qty) {
+    if(stock===null||stock===undefined) return ['#f8f9fa','#6c757d','—'];
+    if(stock===0)    return ['#fde8e8','#c0392b','⚠ Sem stock'];
+    if(stock<qty)    return ['#fef9e7','#e67e22','⚠ Stock baixo'];
+    return ['#eafaf1','#27ae60','✔ Disponível'];
   }
 
-  let materiaisHTML = "";
-  const groupKeys = famOrder.filter(k => groups[k] && groups[k].length);
-  if (groups["Outro"] && groups["Outro"].length) groupKeys.push("Outro");
+  const groupKeys = famOrder.filter(k=>groups[k]&&groups[k].length);
+  if(groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
 
-  groupKeys.forEach(fam => {
-    const items = groups[fam];
-    const label = famLabel[fam] || fam;
-    materiaisHTML += `
-    <div style="margin-bottom:24px">
-      <div style="background:#ed7d31;color:#fff;font-family:Arial,sans-serif;font-size:11px;font-weight:700;
-                  letter-spacing:2px;text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0">
-        ▌ ${label} (${items.length})
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
-        <thead>
-          <tr style="background:#2e75b6;color:#fff">
-            <th style="padding:7px 10px;text-align:center;width:40px">#</th>
-            <th style="padding:7px 10px;text-align:center;width:90px">Ref. PHC</th>
-            <th style="padding:7px 10px;text-align:center;width:85px">Ref. MTMQ</th>
-            <th style="padding:7px 10px;text-align:left">Designação</th>
-            <th style="padding:7px 10px;text-align:center;width:40px">Un</th>
-            <th style="padding:7px 10px;text-align:center;width:45px">Qtd.</th>
-            <th style="padding:7px 10px;text-align:center;width:55px">Stock</th>
-            <th style="padding:7px 10px;text-align:center;width:110px">Estado</th>
-          </tr>
-        </thead>
-        <tbody>`;
-    items.forEach((m, i) => {
-      const qty = typeof m.quantidade==="number" ? m.quantidade : parseFloat(m.quantidade)||0;
-      const [bg, fg, stLbl] = stockStyle(m.stock, qty);
-      const rowBg = i%2===0 ? "#f8f9fa" : "#ffffff";
-      materiaisHTML += `
-          <tr style="background:${rowBg}">
-            <td style="padding:6px 10px;text-align:center;color:#6c757d">${i+1}</td>
-            <td style="padding:6px 10px;text-align:center;color:#1a5276;font-weight:600;font-family:monospace">${m.ref_artigo||"—"}</td>
-            <td style="padding:6px 10px;text-align:center;color:#e67e22;font-family:monospace;font-size:10px">${m.ref_mtmq||"—"}</td>
-            <td style="padding:6px 10px;color:#212529">${m.nome_artigo||m.descricao_tecnica||"—"}</td>
-            <td style="padding:6px 10px;text-align:center;color:#6c757d">${m.unidade||"un"}</td>
-            <td style="padding:6px 10px;text-align:center;font-weight:700">${Number.isInteger(qty)?qty:qty.toFixed(2)}</td>
-            <td style="padding:6px 10px;text-align:center;background:${bg};color:${fg};font-weight:600">${m.stock!==null&&m.stock!==undefined?m.stock:"—"}</td>
-            <td style="padding:6px 10px;text-align:center;background:${bg};color:${fg};font-size:10px;font-weight:700">${stLbl}</td>
-          </tr>`;
+  let matHTML='';
+  groupKeys.forEach(fam=>{
+    const items=groups[fam];
+    matHTML+=`<div style="margin-bottom:16px">
+      <div style="background:#ed7d31;color:#fff;font-family:Arial;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:6px 10px;border-radius:3px 3px 0 0">▌ ${famLabel[fam]||fam} (${items.length})</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10px;font-family:Arial">
+        <thead><tr style="background:#2e75b6;color:#fff">
+          <th style="padding:4px 6px;width:28px;text-align:center">#</th>
+          <th style="padding:4px 6px;width:70px;text-align:center">Ref. PHC</th>
+          <th style="padding:4px 6px;width:85px;text-align:center">Ref. MTMQ</th>
+          <th style="padding:4px 6px;text-align:left">Designação</th>
+          <th style="padding:4px 6px;width:28px;text-align:center">Un</th>
+          <th style="padding:4px 6px;width:32px;text-align:center">Qtd.</th>
+          <th style="padding:4px 6px;width:40px;text-align:center">Stock</th>
+          <th style="padding:4px 6px;width:80px;text-align:center">Estado</th>
+        </tr></thead><tbody>`;
+    items.forEach((m,i)=>{
+      const qty=typeof m.quantidade==='number'?(Number.isInteger(m.quantidade)?m.quantidade:m.quantidade.toFixed(2)):m.quantidade;
+      const[sbg,sfg,stl]=sk(m.stock,m.quantidade);
+      const bg=i%2===0?'#f2f2f2':'#ffffff';
+      matHTML+=`<tr>
+        <td style="padding:4px 6px;background:${bg};text-align:center;color:#6c757d">${i+1}</td>
+        <td style="padding:4px 6px;background:${bg};text-align:center;color:#1a5276;font-weight:700;font-family:monospace">${m.ref_artigo||'—'}</td>
+        <td style="padding:4px 6px;background:${bg};text-align:center;color:#e67e22;font-size:9px">${m.ref_mtmq||'—'}</td>
+        <td style="padding:4px 6px;background:${bg}">${m.nome_artigo||m.descricao_tecnica||'—'}</td>
+        <td style="padding:4px 6px;background:${bg};text-align:center;color:#6c757d">${m.unidade||'un'}</td>
+        <td style="padding:4px 6px;background:${bg};text-align:center;font-weight:700">${qty}</td>
+        <td style="padding:4px 6px;background:${sbg};color:${sfg};text-align:center;font-weight:700">${m.stock!==null&&m.stock!==undefined?m.stock:'—'}</td>
+        <td style="padding:4px 6px;background:${sbg};color:${sfg};text-align:center;font-weight:700;font-size:9px">${stl}</td>
+      </tr>`;
     });
-    materiaisHTML += `</tbody></table></div>`;
+    matHTML+='</tbody></table></div>';
   });
 
-  // Tarefas rows
-  let tarefasHTML = "";
-  (currentResult.tarefas||[]).forEach((t,i) => {
-    const urgBg  = t.urgencia==="alta" ? "#fde8e8" : t.urgencia==="media" ? "#fef9e7" : "#eafaf1";
-    const urgFg  = t.urgencia==="alta" ? "#c0392b" : t.urgencia==="media" ? "#e67e22" : "#27ae60";
-    const urgLbl = t.urgencia==="alta" ? "🔴 ALTA"  : t.urgencia==="media" ? "🟡 MÉDIA" : "🟢 BAIXA";
-    const bg     = i%2===0 ? "#f8f9fa" : "#ffffff";
-    tarefasHTML += `
-      <tr style="background:${bg}">
-        <td style="padding:7px 12px;color:#e67e22;font-family:monospace;font-weight:700;font-size:11px">${t.ref_mtmq||"—"}</td>
-        <td style="padding:7px 12px;color:#6c757d;font-size:11px">${t.categoria||"—"}</td>
-        <td style="padding:7px 12px;color:#212529;font-size:12px">${t.descricao||"—"}</td>
-        <td style="padding:7px 12px;text-align:center;background:${urgBg};color:${urgFg};font-weight:700;font-size:11px">${urgLbl}</td>
-      </tr>`;
+  let tHTML='';
+  (currentResult.tarefas||[]).forEach((t,i)=>{
+    const[ubg,ufg]=t.urgencia==='alta'?['#fde8e8','#c0392b']:t.urgencia==='media'?['#fef9e7','#e67e22']:['#eafaf1','#27ae60'];
+    const uL=t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
+    const bg=i%2===0?'#f2f2f2':'#ffffff';
+    tHTML+=`<tr>
+      <td style="padding:5px 8px;background:${bg};color:#e67e22;font-family:monospace;font-weight:700;font-size:10px;width:60px">${t.ref_mtmq||'—'}</td>
+      <td style="padding:5px 8px;background:${bg};color:#6c757d;font-size:10px;width:90px">${t.categoria||'—'}</td>
+      <td style="padding:5px 8px;background:${bg};font-size:11px">${t.descricao||'—'}</td>
+      <td style="padding:5px 8px;background:${ubg};color:${ufg};text-align:center;font-weight:700;font-size:10px;width:60px">${uL}</td>
+    </tr>`;
   });
 
-  // Planning rows
-  let planHTML = "";
-  (currentResult.planeamento||[]).forEach((d,i) => {
-    const bg = i%2===0 ? "#f8f9fa" : "#ffffff";
-    const tasks = Array.isArray(d.tarefas) ? d.tarefas.join(" · ") : (d.tarefas||"");
-    planHTML += `
-      <tr style="background:${bg}">
-        <td style="padding:10px 14px;text-align:center;color:#1f3864;font-weight:700;font-size:14px">Dia ${d.dia}</td>
-        <td style="padding:10px 14px;color:#212529;font-size:12px">${tasks}</td>
-        <td style="padding:10px 14px;text-align:center;color:#2e75b6;font-weight:700;font-size:13px">${d.horas||"—"}</td>
-      </tr>`;
+  let pHTML='';
+  (currentResult.planeamento||[]).forEach((d,i)=>{
+    const tk=Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
+    const bg=i%2===0?'#f2f2f2':'#ffffff';
+    pHTML+=`<tr>
+      <td style="padding:7px 10px;background:${bg};color:#1f3864;font-weight:700;font-size:12px;text-align:center;width:55px">Dia ${d.dia}</td>
+      <td style="padding:7px 10px;background:${bg};font-size:11px">${tk}</td>
+      <td style="padding:7px 10px;background:${bg};color:#2e75b6;font-weight:700;text-align:center;font-size:11px;width:55px">${d.horas||'—'}</td>
+    </tr>`;
   });
 
-  // Alerts
-  const stockZero = allNeeds.filter(m=>m.stock===0);
-  let alertsHTML = "";
-  [...stockZero.map(m=>({tipo:"stock_zero", descricao:`${m.ref_artigo||"—"} — ${m.nome_artigo||m.descricao_tecnica||"—"} (necessário: ${m.quantidade} ${m.unidade||"un"})`})),
-   ...(currentResult.alertas||[])].forEach(a => {
-    const bg = a.tipo==="stock_zero" ? "#fde8e8" : "#fef9e7";
-    const fg = a.tipo==="stock_zero" ? "#c0392b" : "#e67e22";
-    const icon = a.tipo==="stock_zero" ? "🚫" : "⚠️";
-    alertsHTML += `<div style="background:${bg};border-left:4px solid ${fg};padding:10px 14px;margin-bottom:8px;border-radius:0 4px 4px 0;font-family:Arial,sans-serif;font-size:12px;color:${fg}">${icon} ${a.descricao}</div>`;
+  const stockZero=allNeeds.filter(m=>m.stock===0);
+  let aHTML='';
+  [...stockZero.map(m=>({tipo:'sz',desc:`${m.ref_artigo||'—'} — ${m.nome_artigo||m.descricao_tecnica||'—'} (qtd: ${m.quantidade} ${m.unidade||'un'})`})),
+   ...(currentResult.alertas||[]).map(a=>({tipo:a.tipo,desc:a.descricao}))].forEach(a=>{
+    const[bg,fg,ic]=a.tipo==='sz'?['#fde8e8','#c0392b','🚫']:['#fef9e7','#e67e22','⚠️'];
+    aHTML+=`<div style="background:${bg};border-left:4px solid ${fg};padding:7px 10px;margin-bottom:5px;font-size:11px;color:${fg};border-radius:0 3px 3px 0;font-family:Arial">${ic} ${a.desc}</div>`;
   });
 
-  const reportHTML = `<!DOCTYPE html>
-<html lang="pt">
-<head>
-<meta charset="UTF-8">
-<title>Relatório Necessidades — ${est.id||"Obra"}</title>
+  const LOGO='/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAB4AUgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD3OlFITxzSde+KyLFzRR3pNwoAWikzzjrSkn2oAM80oIprUZzwOtADs0ZpoGKWgBaXJFJn0FAORQAoPrRk+tJRmgBwNGcGkooAXNKabS00A4MOO1LkUyge9UBIWxTQQT0pKSgCTjGMCk+uKbSk0AB44xxSjkDimsc0q5xQA7jPajIzyBTW4ORQT2oADjpgUpIxyBmm9Dmg0AKcDqo/Kk4HAA/KkoNADSB/dFNIUHoKfUZOTQA5QBnFOG3qBTRyKWgB3HpSjHpTM04dKAH8dgaXPXNMHWnEigDpvAZzPd/7qfzNFJ4D/wCPi7/3U/maKaJe5yWeKSiikyg9qPrQelYmu+I7DS2MTlppx1jjxkfU9qynOMFeTNadKVR2irm3kgnFAPFcBc+Nr5m/0ezt0HYOSxP5YruIZGMKM4AYqCfY4rOlXhVvymlfC1KKTn1J8+9FRhwacWArY5h44xSgnvUSyAtxTwaAH/jTc9jQSSKM0AO7Zopo6ZoJ44oAd2xSjNNBzSigBRS0lFADs8UmaTIpc00wFFH40lGaq4C9KM0lFABTgeOtNpR0oAXnrSUUUALSUdRRQAUlFHagANNYZOadQaAGL0pe9HSigAHWlyfWkFLigBQadTF606gDp/AJJnu/91P5mijwCf392P8AYT+Zopol7nJUUUVmWjD8Zao+l6XmBsXEx2Rn+76t+FcRpOmwSWkmq6tPJFZq20bTmSZ/Qf410XjjStV1LUYmtYDJBHFgHcB8xJJ6/hVbxJoepy2+m2dpbGSC3tgGCsOJD9415WJjOc22rpbHu4OVOnSilJJy3M3S9VtTq1tBY6LZoryqgaTMknJ656Zrl/iv8Wdc8NeN7nR9Kt7CW2to49/nRsWLsMnkEcYIr0zwv4dt7C3hubq3zffeJY/6s9gMcfjVTXvAHg7WLy4vtS0G1uLq4O6WZmYOxxjOQeuBXVg6coR9/qcWYVadSdodDz3wd8d7S8vI7TxDposd7BftMDlo1z03KeQPfJr03x9rF5pXgfU9V0tFlu4bYvAMbhnj5sd8Dn8K+Ufidoll4d8dalo+nSNJawOvl72yyhlDbSe+M4r3O18cf8Ib8F/DWpX1m99cXEKQJCZNhYYY7skHgKB9a7Gjzk7nM/APxd4u1jx09pe6jd6lYyQu9x5p3LER91h2XnjA65r6GDDArzP4MeMrLxVHqZsfDsGjR2zIWMJUrIWz1wo5GP1rH8Q/HfQ7K5lttM0u9v3jdk3syxRkg44PJI49KTA9lDAmnfSvALH9oIm5UX3hkpATy0N1lwPoygH869l8La/p/iPR4dV0ycy20oOCV2kEdQR2Io1BGyTRmuM+IHxC0HwaqJqEkk15Ku6K1gGZGH9454Ue5/CvOD+0HGJ8f8IvL5WepvBu/wDQcUrBoe9g+lKG7E15x4E+LHh7xXqMWmQRXlnfy5KQTICHwMnDLkcDnnFbfjjx3oHhC2R9Wuj58ozFbQrvlkHqB2HucCmB1pbk0gY14kP2gdGNyE/4R/UxCT98yx7sf7v/ANevTPB3ivR/FWm/btHuvOQHa6spV429GHY0PQDoi3pRurlvG/jfw/4Rt0k1i8ZJZATFbxIXlkA7hR0HucCuDj+P3hszbDo+sLH/AH/3Z/TdTsB7Pn0oH0rmfBnjLQ/Fts02j3ZlMePMidCskef7wroLieG1geeeRY40GWZjgAUttxpX0RN3pOc1zknjHR0kwpuXB7rGP6nNamk6xYalkWtwGcDJRhtbHrj0rONanJ2TNZYerBXlF2NGjtVa+vLWxhM93OkUfTLdz6AdzWOni/Rml2ebOo/vNFx/jVSrQg7SYoUKk1eKudD3oJqK2uIriFJYZFkjcZVlOQaqajrOm2DFLq7RJP7gBZvyFW5xSu3oQoSk+VLU0KKx7HxHpV7dJbQXDmRzhVaJl3fjirunajZ36u1ncJOqnDbc8H8aUasJbMqVKcPiVi3+NBP50mfrVWy1GzvGf7JdQz+WRuKHO36/kabkkQk3qRWesafeXslnbXKvLFncoBGccHB74rQrD0Ow0RbyfUNMkWZ2yrFZdypk5IHpWtd3VtaR+ZdTxQp/edgBUQm+W8jSpGPNaFybA70Y4qjaatpt3J5dtfQSv/dD8/kau5q4zjLZkSjKLs0LxmjA71QudY0y2l8qfULaN/7pkHH+FWba5guI/MgljlT+8jBh+lJVIt2TBwkldomwKXNJminck6fwB/x8Xf8AuJ/M0UvgD/X3f+4n8zRVx2Je5yVFFHasyhOD2prYp3esbxrqy6H4T1TV2ODa2ryLz1bGFH5kUDucD8Svi/pXhm/l0rT7b+09QiO2YLJtihb+6zckt6gdPWvO7347eJ5YmS30zS7dyOHw74/AnFcb8MtIi8TfEPS9O1NHuIbidmuvnILgKzNkjnrX0hD8JvACMrjw5CSOzTSEH6jdT0RN2z5n8M6FrvxA8XNFF5k9xcy+beXTD5YwT8zseg9h9AK9G/adMGnWfhbw5acQ2sEjqvooCxrn8mr33StJ03SLQWumWFtZQD+CCMIP06/jXzD+0lf/AG34mzwK25LG2ig+hwXb/wBCFC1Dodx8ESvh/wCCuu+InAV5GnmUnv5abV/8ezXkXwy0GPxR460zR7subeaQvcFTglFUs3PbOMfjXrHizOgfsx6bYEbZb+OBSO+ZHMrfoK539lrTxceN7/UGH/HpYkLx0aRgP5A0IGSftGeEPD3hqPRbjQ7COxa4MsUsaMSrBQpDYJPPJ5rp/wBlu7kh8J689xIy2kF2rgnov7rL/oBXOftVah5/irStNT/l1szIR/tSP/gldb8GdKmT4Eah5CMLjUEvHXHUnYUX/wBBo3QbM8Q1e/vvGnjl5zIzXGqXgSLd0VWbag+gGK9Z+K3wx8JeF/hnc6jZw3J1K2MSLcvcEmVmcAkr05GcAV4/8P8AUbXRPGmj6rqKyG2s7lJJQi5YAZ6Dvg/yr0v46/EnQvFHhi10fQbi4mP2pZrhpIGjAVVOBz15P6U9RGV+zNaiX4hS3kvEVjYSylj23YXP5E1yXiHUr/xv48luNxafUbwRW6k8IpbbGv0Ax+teifs/6fKPA3jXVEjLSvatbRAcE4idjj8WFed/Cye0tPiH4fudQkjhtorxGZ2OFXAOCT6ZxQtxvY9Q+KXwo8OeGPh3PqtlPetqFo0e+WWXKzFmCkbcYXrkY9Kyf2Xb25TxxeWUcjfZ57F3kU9Moy7T/wCPEfjXT/tJ+LNLm8L23h+w1CC5uZ7hJp1hkDhY0BI3EccsRge1Zv7KekMt1rPiK4ASGOIWsbtwMk73OfYBc/Wl0B7nA/Ge4v5vibrpvGk3pdNHGG5CxgYQD2xg/jXc+EPBvwt8U6XbQWPiDULXVnjXzIprhQ5fHzYjYYYZz909K63xHp3wz+J9w88GtQw6nD+68+KQRyMBwMq+A6+h/WvEPiN4Yi8I+IE0621q21RfLEokhOGj5IAYAkBuM8GmD0Pqn4ceEdO8GaF/Z1lI1xLI/mXNy6gNM3QcdgBwB9fWk+IwmOm2zKGMCzfvcfTj+v41k/AXWb/W/h1Z3WoyvNPFJJb+a5y0iocAk9zg4/Cu8kSOWNopVV0YYZWGQR7isaseeLjc3w9X2dRTtexnaO2i3diqWMVrJCFA2CNcj/eBGc1bstN0+1mea0s4YZZBtZkXGR6e1YmoeFLPDT6ZLJZXABKbXO3P8xTvBOr3GoafcC6bzJbY8Sd3BBI/HjrXPCXJJRmtTqqQ54OdOTa6r1M1EHiPxjOs+ZLOzBCpnggHA/M5JrqLnR9MntjBJYQBCMfLEFK+4I6VxHhHQodZhubme6miKuFHl45yMknNbbeC7ftql79MCsaXM05ct7nTiFCMlH2lreQnw6Zmtb2HeWijnATnpkH/AAFU9BtrfWPFmpXVzEs0UbEqG5GS2Bkd+Aa39N0+HQNHuVjkeUKHlLsoBOF4HH0rL+G0JGnXNyQcyzAZPfaP8TVqDThTl6kOqmqtWD7I6KDTdPguFnhsbaOVejrGARXMeCT9m13VrAn7pyBn+65H9RXYmuOiH2P4kSqSFS4jZsnpyuf5qa1rqMHGSXUww0pVIzi3fT8jS8bambDSTBGx8+5zGmOoH8R/p+NRWdodC8G3Bf5bjyWeT2dhgD8MgVQ0sHxF4pk1JwTZWeBCD3P8P9W/KtDx/P5Ph11zzLKij353H+VZuXMpVei2NFHkcKC3buyL4fKsHh6W5dsB5Xck/wB1QB/Q1n6DZ/8ACT39zqeps7QI+yKJWIX1x9AMfia09psfABCDDfY8/i3X+dSeAYwnh2F8cyO7nP8AvY/pShG7hTlta5U6nKqlWO97IlvPCujToNkL2zDo0LkH9c1U8ZajLYWdtpVg5We4AQHd8yp0HPqT3+tdPkVwfie3l1DxxDZxzeSxiQLJ/dwpbNaYhKnB8i1ZlhJSrVV7R3SuzbsfCmkQ26pcRPcSlfnkaRhk98AHgVkWUP8AYvjpLCzkc29wAWRjnAKk/oR1q6nh3W+P+KmnP4P/AI1No3hy4tdaTUrzUxeOikDcp3ZIwOSegrHkk2uWFrdTdVYpS56l7p6HTDkUuaTtS16J5B1HgD/X3f8Aup/M0UeAP9fd/wC6n8zRWkdiXuclRRR9KzKAjNYfjjw/D4o8MXehT3MttHdBQ0kYBZcMG6Hg9K2wc0d6APNPh78JNK8H+IRrUWpXN9OsTxossSqF3cFuO+Mj8a9JHBxTqSk3cBp57da8g8V/BG31/wAUX2ty+I54vtlwZni+yhtoP8IO70GM4r2KkxQnYDhfiZ4BXxf4c0/RbfURp0dlKrpmHzAwVNgHUY4qL4SfDuPwJb6grait/NeMhLiHywqqDgYyc8kmu+2gmlxj0oA8g+JvwhuvF/iibW4tehtvMjjjWGS2ZtoUY+8G78npXf8AhzTLTwp4PstMe4QW+nWwWSdvlU4BLOc9BnJroCMiue+IHhlfFfha60Rr2Sz84qRIgzypzhh3U9xRcZ5Frvgv4Y+Lr6bVNF8WW2myyuXmjjdSmTyTsfaV9eOK8g8caXouj67Jp+iavJq8ESgS3XlqqNJ3CYzkDjn1zXcap8EPHFvcFbWLT76LPDpdBc+5D4P866LwJ8Cr7+0I7rxbdQraxtuNnbSb2m/2Wboq+uMk+1UnYlrU7/4BaMdN+F+nCaMLLel7qQEdQ5+XP/AQteKfHPwG/hTX21CwhY6PfMXiOPlgc9Yye3qPUfSvquKNI41iiRURVCqqjAUDoAPSm3VpbXcJhuoI54yQSkiBlP4Hg0k9bj6HyF8Mvh1rXjS7VoENnpcbYmvXX5f91B/G36DvX03a+CtItPAkvg+ya4trKWBonljf96xb7zlscknr2xx0rpYYY4Y1jijWNFGFVVCqo9AB0qTAobuCVj5k1/4D+K7a5c6XNYanBn5CZfJfHurcfkab4b+BPiu7u1GrPZ6Va5G5xKJXPrtVeM/Uivp7bwKcB8tHMxWMvwzotj4e0S10fTYylrbJsTdyzerMe5JyTVHU9D1Aag+o6TqLRTycukpyp9gfT2IrowMUVnOCmrM1pVZU3dHJyab4tv0a3vL+2ggYYcpjLD/gIz+ore0TS7XSbMW1upPd3brI3qf8Kv4oqYUIxd92aVMTOceXRLyOR/sLWtJvZptDnheCU5MUpAx+B4OM9RTn0vxRqf7vUtQitbc/eSE8n8B/U11tFT9Wh0bt6lvGTerSv3sZmrWc8vh+awtmLytCIlMj4J6Akn1wKb4Z0+TTNHhtZtnmgsz7TkZJ9fpitQ8mgitfZrm5jD2suRw6N3A1ynjLRL/UL+G606NSyxFHJkCHvj9Ca6sc80g+lKrTjUjyyKoVpUZ88ShoWmppmlw2ikFlGZG/vMep/wA+lZnjTS77VIrOC0iDIsjNIS4XaCAO/XvXRHil+lDpRcOToEa81U9p1Kl5ZRXWnSWL5WN4/LyvUDHB/DArltOh8VaGhtILGK+g3EoQemevcEfQ12fWkwPSpnRUmnezRVLEOCcWk0+5gaXH4mm1CO61CaC3thnNsmCWGPbPP1NR+J9Iv57+31bSin2qAAFWIG4Dp147kYrpMCih0U4crdxrEyU+dJLyOUkvPGEqeVFpENs3TeSP6titfw7ZX9nbyHUb5rmaV9xGchOOgP8AkVq9O3WgUQo8ru22KpXUo8qikLRRRWxznT/D/wD193/up/M0UfD/AP4+Lz/dT+ZorSOxL3OTooorMoTkVmRai7akbcmAgzNGqqTvUKM5I9K0zyaoLYOLsSGSPyxO04Aj+bJ7bs9KALEk5W+hgCgrIjsTnpjH+NRRXZbSftrKAfKMhXtwDTry3meSOa3kSORAy/OpIIOPT6Cj7Jt0s2SN/wAsTGGI9RjNIB01wYrMT7ck7OM/3iB/WpJX8uORzzsUt+QqK9t3msfIjdQwC4LDjKkH+lO2TSW0iTGPzHVlJQHHI96AILC8lmdUngWJ3iEq7X3Aqfw4PNWI5991PAVx5QTn13An+lVbCzuI5kluHiJjhEKCMHpxknP0FWYoWS7uJiRiXYAB22rihgVjqKebNGE+aO4WE89dxxuqxeTtD5aRxGaSQkKu4L0GSSTVSTTXeZZRIoYXJkPXlCwOPqCP1qzfwSSPFLEsbtHuBRzgMrDB5oGTRfPGrMhRiOVJzt9qhurlLZ1EgIVlZg/bKjJH5Z/Kl06B7ayjgYgsuc46DJJwPpnFJqVt9qtli2qf3iNyccA8/pmgAe68vT/tUsbqdgOwctk4wPryKdZ3BnLo8TxSxkB0Yg4yMjkdaXUYWuLN4oyN+Qy5OASGB/pTLGKfz57ieNY2lKgIrbsBRjr+NAMBeIVEm04NwYB9ckZ/Sn3lybcxKsEszSE4WPGQAMk8mqv2W589YvLTyFujceZv7cnbj1yal1K0munh8qR4tgf51bBBK4H4Z60CLVtKk8CTRnKuoZTTLq6W3KIYppZHyVSJcnA6n6U+yTy7WJDGItqgbAc7fxqG8Ey3UVzFA04WN0ZVYA8kEHn6UATTzpBbGeTeFABwFyxJ6DHrRaXK3CttWRGVtrLIu1lPXkVFfRSS2g2rmVXSTZu64IJGaNOjlM1zcSxGHzXXahIJAVQMnFACHUbZbeacuQkMhjfjncDjpVi5uI7aHzZmKruC5A6E8VkTaVJJbXDDhmMrCIfxsWbY2fYH/OK0dTt2uLaOLbvBlj3gf3c8/pTAmS5ia6a1DZlVA7DHQE4pJbqGPz9zHEGDJx0yMiqdhYyW2pGVmaUtCd8mMAncMD/vkCmajFOXvIUgkkF0qBGUfKpHBye3rQBoTzpBGHlO1SwXPuelLFMkjuiNkxtsYY6N6fqKg1SAXMCRFCymZSwA7c5P61HosM8X2gXIO8z5DH+MBQN344oAtQTRzRGWM/Jk8njocH+VMs7yC73GBiwXHJUjjsRkciobSCT+yngYFHYSAZ7ZZsfzFO06VniWFoJ4jEiqd6YGcYwD3oAnNxF9q+zbv3uzftx/DnFQXmoW1rKIpWcMemImbP4gVTeK8/tQ3nlKY/PCcZ3lMbenTGeavXUbPJaFQSEmycdhtYZoAkeeONULnHmMFXjqT0FNu7qG1RWmcruOFABJPfgCmajG7rbbFLFblGPsOcmmX2+G8tbrypZEjV1YRruIzjBx+GKALKzxtb+eHDR7d24cgj1psVzDK6IkisXj8xcd19aq2kMqaG0TRlZDE+E7jOSB9eRUGk2s9vfopRhALb5TjhSSCV/A5oAvS3ttHdC2eXEhwMYJwT0yegq13rLvPOivibNbkSOU3DZmKQdCSexA71qD60ALRRRQB0/gD/j4u/8AcT+Zopfh/wD6+7/3U/maK0jsS9zkqKPrR3xWZQHiigcmjvQAUUUUgDv0ooooAAKKKPegBO9KaUDNIaADGeKCMUUUAFKvX1oAzTgMUAFFAHHFHegBaMUDrS0IBMUoopRTATHFFL1pMUAHFGKUUUAIQM0dqDRQAUUdqXFADcc0ClxRQAn1FBHNLQOKAExRzmlooAKKKMGgAoo70tAHTfD/AP195/up/M0UvgD/AI+Lv/dT+ZorSOxL3ML+xdW/6B9x/wB80f2Lq3/QPn/75ooqbDuH9i6t/wBA+4/75FH9i6t/0D7j8hRRRYLh/Yurf9A64/If40f2Lq3/AEDrj8hRRS5QuH9i6t/0Drj8h/jR/YurZz/Z9x/3yP8AGiijlC4o0XVcf8g64/IUn9i6tn/kHz/kKKKOULi/2Lqw6afP+VJ/Yurf9A+f8hRRRyhcDomrf9A+4/IUf2Lq3/QOuPyH+NFFHKFwGi6v/wBA+4/75FOGjat/0D5/yFFFHKFxf7F1X/nwn/75oGjar/0D5/8AvmiijlC4f2Nqv/QPn/75o/sbVf8Anwn/AO+aKKfKguL/AGNqv/PhP+VL/Y2qj/lwn/75ooosFw/sfVf+fCf8qDo2qn/lwn/KiiiwXE/sfVf+gfP+Qpf7G1X/AJ8J/wAqKKLBcP7H1X/nwn/IUf2Nqn/QPn/KiiiwXE/sbVP+gfP+VL/Y+q/8+E/5UUUWC4n9jap/0D5/yo/sbVc/8eE/5UUUWC4v9japn/jwn/Kk/sbVP+gfP+VFFFguH9jarj/jwn/IUf2Nqn/QPn/75ooosFwGjar/AM+E/wCVL/Y+q4/48J/yooosFw/sbVf+gfP+VB0fVf8Anwn/ACooosFzoPBdld2k1ybm3kiDKu0sOvJoooqkSz//2Q==';
+
+  const doc=`<!DOCTYPE html><html lang="pt"><head><meta charset="UTF-8">
+<title>Relatório VT — ${est.id||''}</title>
 <style>
-  @page { size: A4; margin: 15mm 12mm; }
-  body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #212529; background: #fff; }
-  .page-break { page-break-before: always; }
-  table { border-collapse: collapse; }
-  th, td { border: 0.5px solid #dee2e6; }
-  @media print {
-    .no-print { display: none !important; }
-    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  }
-</style>
-</head>
-<body>
-
-<!-- ═══════════ PRINT BUTTON (hidden on print) ═══════════ -->
-<div class="no-print" style="position:fixed;top:12px;right:12px;z-index:999;display:flex;gap:8px">
-  <button onclick="window.print()" style="padding:10px 22px;background:#ed7d31;color:#fff;border:none;border-radius:4px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)">
-    🖨 Imprimir / Guardar PDF
-  </button>
-  <button onclick="window.close()" style="padding:10px 16px;background:#6c757d;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer">
-    ✕ Fechar
-  </button>
+  @page{size:A4;margin:12mm 10mm}
+  body{font-family:Arial,sans-serif;margin:0;padding:0;color:#212529;background:#fff}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:0.5px solid #dee2e6}
+  .pb{page-break-before:always}
+  @media print{.np{display:none!important};body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style></head><body>
+<div class="np" style="position:fixed;top:10px;right:10px;z-index:999">
+  <button onclick="window.print()" style="padding:8px 18px;background:#ed7d31;color:#fff;border:none;border-radius:4px;font-weight:700;font-size:12px;cursor:pointer">🖨 Imprimir / PDF</button>
 </div>
-
-<!-- ═══════════ HEADER ═══════════ -->
-<table style="width:100%;margin-bottom:0;border:none">
-  <tr>
-    <td style="border:none;padding:0;width:220px;vertical-align:middle">
-      <img src="data:image/jpeg;base64,${LOGO_B64}" style="height:60px;width:auto;display:block" alt="Pingos Service"/>
-    </td>
-    <td style="border:none;padding:0;vertical-align:middle;text-align:right">
-      <div style="font-size:9px;color:#6c757d;font-family:Arial,sans-serif">
-        Building Your Communications<br>
-        <strong style="color:#1f3864">Vantage Towers O&amp;M</strong> · Gerado em ${today}
-      </div>
-    </td>
-  </tr>
+<table style="border:none;margin-bottom:0"><tr>
+  <td style="border:none;padding:0;width:180px;vertical-align:middle">
+    <img src="data:image/jpeg;base64,${LOGO}" style="height:50px;width:auto" alt="Pingos Service"/>
+  </td>
+  <td style="border:none;padding:0;text-align:right;vertical-align:middle">
+    <div style="font-size:9px;color:#6c757d;font-family:Arial">Building Your Communications<br>
+    <strong style="color:#1f3864">Vantage Towers O&amp;M</strong> · ${today}</div>
+  </td>
+</tr></table>
+<div style="background:#1f3864;color:#fff;padding:9px 12px;margin:5px 0 0;border-radius:3px 3px 0 0">
+  <div style="font-size:14px;font-weight:700">LEVANTAMENTO DE NECESSIDADES</div>
+  <div style="font-size:11px;margin-top:2px;opacity:.9">${est.id||''}</div>
+</div>
+<div style="background:#2e75b6;color:#fff;padding:4px 12px;font-size:9px;margin-bottom:12px;border-radius:0 0 3px 3px">
+  ${est.torre_tipo||'Torre'}${est.torre_altura?' · '+est.torre_altura:''} | Inspeção: ${est.data_inspecao||'—'} |
+  <strong style="background:${priorColor};padding:1px 6px;border-radius:2px">${priorLabel}</strong> | ${est.morada||est.local||''}
+</div>
+<table style="border:none;margin-bottom:12px"><tr>
+  <td style="border:none;padding:0;width:33%;vertical-align:top">
+    <div style="background:#f0f4f8;border-left:4px solid #1f3864;padding:7px 9px;margin-right:4px;border-radius:0 3px 3px 0">
+      <div style="font-size:8px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:1px">Dias Estimados</div>
+      <div style="font-size:18px;font-weight:700;color:#1f3864">${currentResult.dias_estimados||'—'}</div>
+    </div>
+  </td>
+  <td style="border:none;padding:0;width:33%;vertical-align:top">
+    <div style="background:#f0f4f8;border-left:4px solid #ed7d31;padding:7px 9px;margin-right:4px;border-radius:0 3px 3px 0">
+      <div style="font-size:8px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:1px">Total Artigos</div>
+      <div style="font-size:18px;font-weight:700;color:#ed7d31">${allNeeds.length}</div>
+    </div>
+  </td>
+  <td style="border:none;padding:0;width:33%;vertical-align:top">
+    <div style="background:#fde8e8;border-left:4px solid #c0392b;padding:7px 9px;border-radius:0 3px 3px 0">
+      <div style="font-size:8px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:1px">Sem Stock</div>
+      <div style="font-size:18px;font-weight:700;color:#c0392b">${stockZero.length}</div>
+    </div>
+  </td>
+</tr></table>
+${matHTML}
+<div class="pb"></div>
+<table style="border:none;margin-bottom:5px"><tr>
+  <td style="border:none;padding:0;width:180px"><img src="data:image/jpeg;base64,${LOGO}" style="height:42px;width:auto" alt="Pingos Service"/></td>
+  <td style="border:none;padding:0;text-align:right;vertical-align:middle"><div style="font-size:10px;color:#1f3864;font-weight:700">${est.id||''} · ${today}</div></td>
+</tr></table>
+<div style="height:2px;background:linear-gradient(90deg,#1f3864,#ed7d31);margin-bottom:12px"></div>
+<div style="background:#ed7d31;color:#fff;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:6px 10px;border-radius:3px 3px 0 0">▌ TAREFAS (${(currentResult.tarefas||[]).length})</div>
+<table style="margin-bottom:16px;font-size:10px">
+  <thead><tr style="background:#2e75b6;color:#fff">
+    <th style="padding:5px 8px;width:60px;text-align:center">Ref. MTMQ</th>
+    <th style="padding:5px 8px;width:90px;text-align:left">Categoria</th>
+    <th style="padding:5px 8px;text-align:left">Descrição</th>
+    <th style="padding:5px 8px;width:60px;text-align:center">Urgência</th>
+  </tr></thead><tbody>${tHTML}</tbody>
 </table>
-
-<div style="background:#1f3864;color:#fff;padding:12px 16px;margin:8px 0 0 0;border-radius:3px 3px 0 0">
-  <div style="font-size:16px;font-weight:700;letter-spacing:0.5px">LEVANTAMENTO DE NECESSIDADES</div>
-  <div style="font-size:13px;margin-top:3px;opacity:0.9">${est.id||""}</div>
-</div>
-<div style="background:#2e75b6;color:#fff;padding:7px 16px;font-size:10px;margin-bottom:16px;border-radius:0 0 3px 3px">
-  ${est.torre_tipo||"Torre"}${est.torre_altura?" · "+est.torre_altura:""} &nbsp;|&nbsp;
-  Inspeção ISQ: ${est.data_inspecao||"—"} &nbsp;|&nbsp;
-  <strong style="background:${priorColor};padding:1px 8px;border-radius:2px">${priorLabel}</strong>
-  &nbsp;|&nbsp; ${est.morada||est.local||""}
-</div>
-
-<!-- ═══════════ INFO CARDS ═══════════ -->
-<table style="width:100%;border:none;margin-bottom:16px">
-  <tr>
-    <td style="border:none;padding:0;width:33%;vertical-align:top">
-      <div style="background:#f0f4f8;border-left:4px solid #1f3864;padding:10px 12px;margin-right:6px;border-radius:0 4px 4px 0">
-        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Dias Estimados</div>
-        <div style="font-size:22px;font-weight:700;color:#1f3864">${currentResult.dias_estimados||"—"}</div>
-        <div style="font-size:10px;color:#6c757d">dias úteis</div>
-      </div>
-    </td>
-    <td style="border:none;padding:0;width:33%;vertical-align:top">
-      <div style="background:#f0f4f8;border-left:4px solid #ed7d31;padding:10px 12px;margin-right:6px;border-radius:0 4px 4px 0">
-        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Total Artigos</div>
-        <div style="font-size:22px;font-weight:700;color:#ed7d31">${allNeeds.length}</div>
-        <div style="font-size:10px;color:#6c757d">necessidades identificadas</div>
-      </div>
-    </td>
-    <td style="border:none;padding:0;width:33%;vertical-align:top">
-      <div style="background:#fde8e8;border-left:4px solid #c0392b;padding:10px 12px;border-radius:0 4px 4px 0">
-        <div style="font-size:9px;color:#6c757d;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Sem Stock</div>
-        <div style="font-size:22px;font-weight:700;color:#c0392b">${allNeeds.filter(m=>m.stock===0).length}</div>
-        <div style="font-size:10px;color:#c0392b">artigos a encomendar</div>
-      </div>
-    </td>
-  </tr>
+<div style="background:#ed7d31;color:#fff;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:6px 10px;border-radius:3px 3px 0 0">▌ PLANEAMENTO — ${currentResult.dias_estimados||'?'} DIA(S)</div>
+<table style="margin-bottom:16px;font-size:10px">
+  <thead><tr style="background:#2e75b6;color:#fff">
+    <th style="padding:5px 10px;width:55px;text-align:center">Dia</th>
+    <th style="padding:5px 10px;text-align:left">Tarefas</th>
+    <th style="padding:5px 10px;width:55px;text-align:center">Duração</th>
+  </tr></thead><tbody>${pHTML}</tbody>
 </table>
+${aHTML?`<div style="background:#ed7d31;color:#fff;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:6px 10px;border-radius:3px 3px 0 0">▌ ALERTAS</div><div style="padding:8px 0">${aHTML}</div>`:''}
+<div style="background:#1f3864;color:#fff;padding:7px 12px;margin-top:14px;border-radius:3px;font-size:8px;display:flex;justify-content:space-between;font-family:Arial">
+  <span>Pingos Service · Building Your Communications</span><span>Gerado automaticamente · ${today}</span>
+</div></body></html>`;
 
-<!-- ═══════════ MATERIAIS ═══════════ -->
-${materiaisHTML}
-
-<!-- ═══════════ PAGE 2: TAREFAS + PLANEAMENTO ═══════════ -->
-<div class="page-break"></div>
-
-<!-- Header repetido -->
-<table style="width:100%;margin-bottom:0;border:none">
-  <tr>
-    <td style="border:none;padding:0;width:220px">
-      <img src="data:image/jpeg;base64,${LOGO_B64}" style="height:50px;width:auto" alt="Pingos Service"/>
-    </td>
-    <td style="border:none;padding:0;text-align:right;vertical-align:middle">
-      <div style="font-size:10px;color:#1f3864;font-weight:700">${est.id||""} · ${today}</div>
-    </td>
-  </tr>
-</table>
-<div style="height:2px;background:linear-gradient(90deg,#1f3864,#ed7d31);margin:6px 0 16px 0"></div>
-
-<!-- Tarefas -->
-<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
-            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0;margin-bottom:0">
-  ▌ TAREFAS A EXECUTAR (${(currentResult.tarefas||[]).length})
-</div>
-<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:20px">
-  <thead>
-    <tr style="background:#2e75b6;color:#fff">
-      <th style="padding:7px 10px;width:70px;text-align:center">Ref. MTMQ</th>
-      <th style="padding:7px 10px;width:110px;text-align:left">Categoria</th>
-      <th style="padding:7px 10px;text-align:left">Descrição</th>
-      <th style="padding:7px 10px;width:70px;text-align:center">Urgência</th>
-    </tr>
-  </thead>
-  <tbody>${tarefasHTML}</tbody>
-</table>
-
-<!-- Planeamento -->
-<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
-            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0">
-  ▌ PLANEAMENTO — ${currentResult.dias_estimados||"?"} DIA(S) ÚTIL(IS)
-</div>
-<table style="width:100%;border-collapse:collapse;margin-bottom:20px">
-  <thead>
-    <tr style="background:#2e75b6;color:#fff">
-      <th style="padding:8px 14px;width:80px;text-align:center;font-size:11px">Dia</th>
-      <th style="padding:8px 14px;text-align:left;font-size:11px">Tarefas</th>
-      <th style="padding:8px 14px;width:80px;text-align:center;font-size:11px">Duração</th>
-    </tr>
-  </thead>
-  <tbody>${planHTML}</tbody>
-</table>
-
-${alertsHTML ? `
-<div style="background:#ed7d31;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;
-            text-transform:uppercase;padding:8px 14px;border-radius:3px 3px 0 0;margin-top:8px">
-  ▌ ALERTAS (${stockZero.length+(currentResult.alertas||[]).length})
-</div>
-<div style="padding:12px 0">${alertsHTML}</div>` : ""}
-
-<!-- Footer -->
-<div style="background:#1f3864;color:#fff;padding:10px 16px;margin-top:20px;border-radius:3px;
-            font-family:Arial,sans-serif;font-size:9px;display:flex;justify-content:space-between">
-  <span>Pingos Service · Building Your Communications</span>
-  <span>Documento gerado automaticamente · ${today}</span>
-</div>
-
-</body>
-</html>`;
-
-
-  // Build blob and always download (works in Electron + all browsers, no popup needed)
-  const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
-  const fname = 'VT_Relatorio_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.html';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = fname;
+  const blob=new Blob([doc],{type:'text/html;charset=utf-8'});
+  const fname='VT_Relatorio_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.html';
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fname;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-
-  // Also try to open in new tab as bonus (may work in browser but not Electron)
-  try { window.open(a.href, '_blank'); } catch(e) {}
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
 
