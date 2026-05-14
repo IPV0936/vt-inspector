@@ -641,6 +641,16 @@
     flex-shrink: 0;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .export-opt-btn {
+    width:100%;display:flex;align-items:center;gap:12px;padding:11px 16px;
+    background:transparent;border:none;border-bottom:1px solid var(--border);
+    color:var(--text);cursor:pointer;text-align:left;transition:background 0.15s;
+  }
+  .export-opt-btn:hover { background:rgba(255,255,255,0.05); }
+  .exp-icon { font-size:20px;flex-shrink:0; }
+  .exp-title { font-family:'Syne',sans-serif;font-weight:600;font-size:13px;margin-bottom:2px; }
+  .exp-sub   { font-family:'DM Mono',monospace;font-size:10px;color:var(--muted); }
 </style>
 </head>
 <body>
@@ -785,16 +795,40 @@
 
     <div class="download-bar">
       <div class="dl-info">
-        <strong id="dlCount">0</strong> artigos identificados
-        &nbsp;·&nbsp;
+        <strong id="dlCount">0</strong> artigos &nbsp;·&nbsp;
         <strong id="dlAlertCount" style="color:var(--warn)">0</strong> sem stock
       </div>
-      <button class="btn-download" id="btnDlJson" disabled onclick="downloadJSON()">
-        ⬇ JSON
-      </button>
-      <button class="btn-download btn-download-primary" id="btnDlXls" disabled onclick="downloadReport()">
-        ⬇ Relatório PDF
-      </button>
+      <div style="position:relative;margin-left:auto" id="exportMenuWrap">
+        <button class="btn-download btn-download-primary" id="btnDlXls" disabled
+          onclick="toggleExportMenu()"
+          style="display:flex;align-items:center;gap:8px;padding:10px 20px">
+          <span>⬇ Gerar Relatório</span>
+          <span id="exportChevron" style="font-size:9px">▲</span>
+        </button>
+        <div id="exportMenu" style="display:none;position:absolute;bottom:54px;right:0;
+          background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+          overflow:hidden;min-width:230px;box-shadow:0 -4px 24px rgba(0,0,0,.5);z-index:200">
+          <div style="padding:8px 14px 6px;font-family:'DM Mono',monospace;font-size:9px;
+            color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;border-bottom:1px solid var(--border)">
+            Formato de exportação
+          </div>
+          <button onclick="downloadReport();closeExportMenu()" class="export-opt-btn">
+            <span class="exp-icon">📄</span>
+            <div><div class="exp-title">Relatório PDF</div>
+            <div class="exp-sub">Formatado · Cores Pingos · Pronto a enviar</div></div>
+          </button>
+          <button onclick="downloadExcel();closeExportMenu()" class="export-opt-btn">
+            <span class="exp-icon">📊</span>
+            <div><div class="exp-title">Relatório Excel</div>
+            <div class="exp-sub">3 separadores · Nécessidades + Tarefas + Planeamento</div></div>
+          </button>
+          <button onclick="downloadPHC();closeExportMenu()" class="export-opt-btn" style="border-bottom:none">
+            <span class="exp-icon">🏭</span>
+            <div><div class="exp-title">Importação PHC</div>
+            <div class="exp-sub">Template REF · QTT · ARM (armazém automático)</div></div>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1362,13 +1396,227 @@ async function analyse() {
 // ══════════════════════════════════════════════════════════════════════════
 // DOWNLOAD FUNCTIONS
 // ══════════════════════════════════════════════════════════════════════════
+// ── EXPORT MENU ──────────────────────────────────────────────────────────
+function toggleExportMenu() {
+  const m = document.getElementById('exportMenu');
+  const c = document.getElementById('exportChevron');
+  const open = m.style.display === 'block';
+  m.style.display = open ? 'none' : 'block';
+  c.textContent = open ? '▲' : '▼';
+  if (!open) {
+    setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+  }
+}
+function closeExportMenu() {
+  document.getElementById('exportMenu').style.display = 'none';
+  document.getElementById('exportChevron').textContent = '▲';
+  document.removeEventListener('click', closeOnOutside);
+}
+function closeOnOutside(e) {
+  if (!document.getElementById('exportMenuWrap').contains(e.target)) {
+    closeExportMenu();
+  }
+}
+
+// ── ARMAZÉM LOGIC (PHC) ──────────────────────────────────────────────────
+function getArmazem(ref) {
+  const r = String(ref || '').trim();
+  if (!r || r === '—') return 1000;
+  const first = r[0];
+  if (first === '2') return 1000;
+  if (first === '1') return 9000;
+  if (first === '8') return parseInt(r.substring(0, 2)) * 100;  // 82→8200, 83→8300
+  return parseInt(first) * 1000;  // 3→3000, 4→4000, 5→5000, 6→6000, 7→7000
+}
+
+// ── JSON ──────────────────────────────────────────────────────────────────
 function downloadJSON() {
   if (!currentResult) return;
-  const est = currentResult.estacao || {};
-  const blob = new Blob([JSON.stringify(currentResult, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
+  const est  = currentResult.estacao || {};
+  const blob = new Blob([JSON.stringify(currentResult, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = "necessidades_" + (est.id || "obra").replace(/\s+/g, "_") + ".json";
+  a.download = 'necessidades_' + (est.id||'obra').replace(/\s+/g,'_') + '.json';
+  a.click();
+}
+
+// ── PHC IMPORT TEMPLATE ───────────────────────────────────────────────────
+function downloadPHC() {
+  if (!currentResult) return;
+  const est = currentResult.estacao || {};
+
+  // Filter only items that have a valid REF
+  const items = allNeeds.filter(m => m.ref_artigo && m.ref_artigo !== '—');
+
+  const rows = [['REF', 'QTT', 'ARM']];
+  items.forEach(m => {
+    const qty = typeof m.quantidade === 'number'
+      ? (Number.isInteger(m.quantidade) ? m.quantidade : parseFloat(m.quantidade.toFixed(3)))
+      : m.quantidade;
+    const arm = getArmazem(m.ref_artigo);
+    rows.push([m.ref_artigo, qty, arm]);
+  });
+
+  const ws   = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:12},{wch:8}];
+  const wb   = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Folha1');
+
+  const fname = 'PHC_Import_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xlsx';
+  XLSX.writeFile(wb, fname);
+}
+
+// ── EXCEL REPORT (styled via HTML table trick) ────────────────────────────
+function downloadExcel() {
+  if (!currentResult) return;
+  const est   = currentResult.estacao || {};
+  const today = new Date().toLocaleDateString('pt-PT');
+  const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
+
+  // Groups
+  const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
+  const famLabel  = {'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento','MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
+  const groups = {};
+  allNeeds.forEach(m => {
+    const g = famOrder.includes(m.familia) ? m.familia : 'Outro';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(m);
+  });
+
+  function stockColor(stock, qty) {
+    if (stock===null||stock===undefined) return ['#f8f9fa','#6c757d'];
+    if (stock===0)    return ['#fde8e8','#c0392b'];
+    if (stock<qty)    return ['#fef9e7','#e67e22'];
+    return ['#eafaf1','#27ae60'];
+  }
+
+  // Build HTML that Excel can open with styles preserved
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+    xmlns:x="urn:schemas-microsoft-com:office:excel"
+    xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="UTF-8">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 10pt; }
+  .h-dark  { background:#1F3864; color:#fff; font-weight:bold; font-size:12pt; }
+  .h-blue  { background:#2E75B6; color:#fff; font-weight:bold; font-size:10pt; }
+  .h-orange{ background:#ED7D31; color:#fff; font-weight:bold; font-size:11pt; }
+  .h-light { background:#D6E4F0; color:#1F3864; font-size:9pt; }
+  .col-hdr { background:#2E75B6; color:#fff; font-weight:bold; font-size:9pt; text-align:center; }
+  .r-even  { background:#F2F2F2; }
+  .r-odd   { background:#FFFFFF; }
+  td, th   { border:0.5pt solid #DEE2E6; padding:4pt 8pt; vertical-align:middle; }
+  .ref-phc { color:#1A5276; font-weight:bold; font-family:monospace; }
+  .ref-mtmq{ color:#E67E22; font-family:monospace; font-size:9pt; }
+  .footer  { background:#1F3864; color:#fff; font-size:8pt; }
+</style>
+</head><body>
+<table border="0" cellspacing="0" cellpadding="0" width="100%">`;
+
+  // Title row
+  html += `<tr><td colspan="10" class="h-dark" style="padding:10pt 14pt">
+    LEVANTAMENTO DE NECESSIDADES — ${est.id||''}
+  </td></tr>
+  <tr><td colspan="10" class="h-blue" style="padding:5pt 14pt;font-size:9pt">
+    ${est.torre_tipo||'Torre'}${est.torre_altura?' · '+est.torre_altura:''} &nbsp;|&nbsp;
+    Inspeção: ${est.data_inspecao||'—'} &nbsp;|&nbsp;
+    ${priorLabel} &nbsp;|&nbsp; ${est.morada||est.local||''} &nbsp;|&nbsp; Exportado: ${today}
+  </td></tr>
+  <tr><td colspan="10" style="padding:4pt"></td></tr>`;
+
+  const groupKeys = famOrder.filter(k=>groups[k]&&groups[k].length);
+  if (groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
+
+  groupKeys.forEach(fam => {
+    const items = groups[fam];
+    html += `<tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">
+      ▌ ${famLabel[fam]||fam} (${items.length})
+    </td></tr>
+    <tr>
+      <th class="col-hdr" width="30">#</th>
+      <th class="col-hdr" width="90">Ref. PHC</th>
+      <th class="col-hdr" width="80">Ref. MTMQ</th>
+      <th class="col-hdr">Designação</th>
+      <th class="col-hdr" width="35">Un</th>
+      <th class="col-hdr" width="40">Qtd.</th>
+      <th class="col-hdr" width="50">Stock</th>
+      <th class="col-hdr" width="80">Estado</th>
+      <th class="col-hdr" width="50">Armazém</th>
+      <th class="col-hdr">Observações</th>
+    </tr>`;
+
+    items.forEach((m, i) => {
+      const qty = typeof m.quantidade==='number'
+        ? (Number.isInteger(m.quantidade)?m.quantidade:m.quantidade.toFixed(2))
+        : m.quantidade;
+      const [sbg, sfg] = stockColor(m.stock, m.quantidade);
+      const stLbl = m.stock===null?'—':m.stock===0?'⚠ Sem stock':m.stock<m.quantidade?'⚠ Stock baixo':'✔ Disponível';
+      const arm   = m.ref_artigo && m.ref_artigo!=='—' ? getArmazem(m.ref_artigo) : '—';
+      const rowCls = i%2===0?'r-even':'r-odd';
+      html += `<tr class="${rowCls}">
+        <td style="text-align:center;color:#6c757d">${i+1}</td>
+        <td class="ref-phc" style="text-align:center">${m.ref_artigo||'—'}</td>
+        <td class="ref-mtmq" style="text-align:center">${m.ref_mtmq||'—'}</td>
+        <td>${m.nome_artigo||m.descricao_tecnica||'—'}</td>
+        <td style="text-align:center;color:#6c757d">${m.unidade||'un'}</td>
+        <td style="text-align:center;font-weight:bold">${qty}</td>
+        <td style="text-align:center;background:${sbg};color:${sfg};font-weight:bold">${m.stock!==null&&m.stock!==undefined?m.stock:'—'}</td>
+        <td style="text-align:center;background:${sbg};color:${sfg};font-weight:bold;font-size:9pt">${stLbl}</td>
+        <td style="text-align:center;color:#1F3864;font-weight:bold">${arm}</td>
+        <td style="font-size:9pt;color:#6c757d">${m.notas||''}</td>
+      </tr>`;
+    });
+    html += `<tr><td colspan="10" style="padding:3pt"></td></tr>`;
+  });
+
+  // Tarefas sheet equivalent - add as second section
+  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
+  <tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">▌ TAREFAS (${(currentResult.tarefas||[]).length})</td></tr>
+  <tr>
+    <th class="col-hdr" width="70">Ref. MTMQ</th>
+    <th class="col-hdr" width="110">Categoria</th>
+    <th class="col-hdr">Descrição</th>
+    <th class="col-hdr" width="70">Urgência</th>
+  </tr>`;
+
+  (currentResult.tarefas||[]).forEach((t,i) => {
+    const [ubg, ufg] = t.urgencia==='alta'?['#fde8e8','#c0392b']:t.urgencia==='media'?['#fef9e7','#e67e22']:['#eafaf1','#27ae60'];
+    const uLbl = t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
+    html += `<tr class="${i%2===0?'r-even':'r-odd'}">
+      <td class="ref-mtmq" style="text-align:center">${t.ref_mtmq||'—'}</td>
+      <td style="color:#6c757d">${t.categoria||'—'}</td>
+      <td>${t.descricao||'—'}</td>
+      <td style="text-align:center;background:${ubg};color:${ufg};font-weight:bold">${uLbl}</td>
+    </tr>`;
+  });
+
+  // Planeamento
+  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
+  <tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">▌ PLANEAMENTO</td></tr>
+  <tr>
+    <th class="col-hdr" width="60">Dia</th>
+    <th class="col-hdr">Tarefas</th>
+    <th class="col-hdr" width="70">Duração</th>
+  </tr>`;
+
+  (currentResult.planeamento||[]).forEach((d,i) => {
+    const tasks = Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
+    html += `<tr class="${i%2===0?'r-even':'r-odd'}">
+      <td style="text-align:center;color:#1F3864;font-weight:bold;font-size:12pt">Dia ${d.dia}</td>
+      <td>${tasks}</td>
+      <td style="text-align:center;color:#2E75B6;font-weight:bold">${d.horas||'—'}</td>
+    </tr>`;
+  });
+
+  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
+  <tr><td colspan="10" class="footer" style="padding:6pt 14pt">
+    Pingos Service · Building Your Communications · Gerado automaticamente em ${today}
+  </td></tr>
+</table></body></html>`;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'VT_Necessidades_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xls';
   a.click();
 }
 
@@ -1638,6 +1886,7 @@ ${alertsHTML ? `
   win.document.write(reportHTML);
   win.document.close();
 }
+
 
 // ══════════════════════════════════════════════════════════════════════════
 // FILE HANDLING
