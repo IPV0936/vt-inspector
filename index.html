@@ -95,7 +95,10 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 
   .panel-header {
@@ -1473,151 +1476,204 @@ function downloadExcel() {
   const today = new Date().toLocaleDateString('pt-PT');
   const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
 
-  // Groups
-  const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
-  const famLabel  = {'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento','MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
-  const groups = {};
-  allNeeds.forEach(m => {
-    const g = famOrder.includes(m.familia) ? m.familia : 'Outro';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(m);
-  });
+  // Use XML Spreadsheet 2003 format - full color support in Excel without any lib
+  const C = {
+    darkBlue: '#1F3864', medBlue: '#2E75B6', orange: '#ED7D31',
+    white: '#FFFFFF', grey: '#F2F2F2', lightBlue: '#D6E4F0',
+    red: '#FFC7CE', redFg: '#9C0006',
+    green: '#C6EFCE', greenFg: '#276221',
+    yellow: '#FFEB9C', yellowFg: '#9C6500',
+    muted: '#6B7280', black: '#000000'
+  };
 
-  function stockColor(stock, qty) {
-    if (stock===null||stock===undefined) return ['#f8f9fa','#6c757d'];
-    if (stock===0)    return ['#fde8e8','#c0392b'];
-    if (stock<qty)    return ['#fef9e7','#e67e22'];
-    return ['#eafaf1','#27ae60'];
+  function hexToExcel(hex) {
+    return hex.replace('#','');
   }
 
-  // Build HTML that Excel can open with styles preserved
-  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
-    xmlns:x="urn:schemas-microsoft-com:office:excel"
-    xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="UTF-8">
-<style>
-  body { font-family: Arial, sans-serif; font-size: 10pt; }
-  .h-dark  { background:#1F3864; color:#fff; font-weight:bold; font-size:12pt; }
-  .h-blue  { background:#2E75B6; color:#fff; font-weight:bold; font-size:10pt; }
-  .h-orange{ background:#ED7D31; color:#fff; font-weight:bold; font-size:11pt; }
-  .h-light { background:#D6E4F0; color:#1F3864; font-size:9pt; }
-  .col-hdr { background:#2E75B6; color:#fff; font-weight:bold; font-size:9pt; text-align:center; }
-  .r-even  { background:#F2F2F2; }
-  .r-odd   { background:#FFFFFF; }
-  td, th   { border:0.5pt solid #DEE2E6; padding:4pt 8pt; vertical-align:middle; }
-  .ref-phc { color:#1A5276; font-weight:bold; font-family:monospace; }
-  .ref-mtmq{ color:#E67E22; font-family:monospace; font-size:9pt; }
-  .footer  { background:#1F3864; color:#fff; font-size:8pt; }
-</style>
-</head><body>
-<table border="0" cellspacing="0" cellpadding="0" width="100%">`;
+  function cell(val, bgHex, fgHex, bold, sz, wrapText, hAlign) {
+    const bg  = hexToExcel(bgHex  || C.white);
+    const fg  = hexToExcel(fgHex  || C.black);
+    const ha  = hAlign || 'Left';
+    const b   = bold ? '1' : '0';
+    const s   = sz || 10;
+    const w   = wrapText ? '1' : '0';
+    const v   = String(val ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const num = typeof val === 'number';
+    return `<Cell ss:StyleID="s${bg}_${fg}_${b}_${s}_${w}_${ha}">` +
+           `<Data ss:Type="${num?'Number':'String'}">${v}</Data></Cell>`;
+  }
 
-  // Title row
-  html += `<tr><td colspan="10" class="h-dark" style="padding:10pt 14pt">
-    LEVANTAMENTO DE NECESSIDADES — ${est.id||''}
-  </td></tr>
-  <tr><td colspan="10" class="h-blue" style="padding:5pt 14pt;font-size:9pt">
-    ${est.torre_tipo||'Torre'}${est.torre_altura?' · '+est.torre_altura:''} &nbsp;|&nbsp;
-    Inspeção: ${est.data_inspecao||'—'} &nbsp;|&nbsp;
-    ${priorLabel} &nbsp;|&nbsp; ${est.morada||est.local||''} &nbsp;|&nbsp; Exportado: ${today}
-  </td></tr>
-  <tr><td colspan="10" style="padding:4pt"></td></tr>`;
+  // Collect all unique styles
+  const styleMap = {};
+  function regStyle(bgHex, fgHex, bold, sz, wrap, ha) {
+    const bg = hexToExcel(bgHex||C.white);
+    const fg = hexToExcel(fgHex||C.black);
+    const b  = bold?'1':'0';
+    const s  = sz||10;
+    const w  = wrap?'1':'0';
+    const h  = ha||'Left';
+    const id = `s${bg}_${fg}_${b}_${s}_${w}_${h}`;
+    if (!styleMap[id]) {
+      styleMap[id] = `<Style ss:ID="${id}">
+        <Alignment ss:Horizontal="${h}" ss:Vertical="Center" ss:WrapText="${w}"/>
+        <Borders>
+          <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+          <Border ss:Position="Left"   ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+          <Border ss:Position="Right"  ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+          <Border ss:Position="Top"    ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D0D5DD"/>
+        </Borders>
+        <Font ss:FontName="Arial" ss:Size="${s}" ss:Bold="${b}" ss:Color="#${fg}"/>
+        <Interior ss:Color="#${bg}" ss:Pattern="Solid"/>
+      </Style>`;
+    }
+    return id;
+  }
+
+  function c(val, bg, fg, bold, sz, wrap, ha) {
+    regStyle(bg||C.white, fg||C.black, bold, sz||10, wrap, ha||'Left');
+    return cell(val, bg||C.white, fg||C.black, bold, sz||10, wrap, ha||'Left');
+  }
+  function mc(val, bg, fg, bold, sz, span) {
+    regStyle(bg||C.white, fg||C.black, bold, sz||10, false, 'Left');
+    const b = bold?'1':'0'; const s = sz||10;
+    const bg2 = hexToExcel(bg||C.white); const fg2 = hexToExcel(fg||C.black);
+    const v = String(val ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<Cell ss:StyleID="s${bg2}_${fg2}_${b}_${s}_0_Left" ss:MergeAcross="${span-1}">` +
+           `<Data ss:Type="String">${v}</Data></Cell>` +
+           Array(span-1).fill('<Cell ss:StyleID="s'+bg2+'_'+fg2+'_'+b+'_'+s+'_0_Left"><Data ss:Type="String"></Data></Cell>').join('');
+  }
+
+  function sectionRow(label, cols) {
+    return '<Row ss:Height="22">' + mc('▌ '+label, C.orange, C.white, true, 11, cols) + '</Row>';
+  }
+  function hdrRow(hdrs) {
+    return '<Row ss:Height="24">' + hdrs.map(([v,w]) =>
+      c(v, C.medBlue, C.white, true, 10, true, 'Center') + (w?`<!-- w${w} -->`:'')
+    ).join('') + '</Row>';
+  }
+
+  const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
+  const famLabel = {'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento',
+                    'MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
+  const groups = {};
+  allNeeds.forEach(m => {
+    const g = famOrder.includes(m.familia)?m.familia:'Outro';
+    if (!groups[g]) groups[g]=[]; groups[g].push(m);
+  });
+
+  function stockBg(stock, qty) {
+    if (stock===null||stock===undefined) return [C.grey, C.muted, '—'];
+    if (stock===0)    return [C.red,    C.redFg,    '⚠ Sem stock'];
+    if (stock<qty)    return [C.yellow, C.yellowFg, '⚠ Stock baixo'];
+    return [C.green, C.greenFg, '✔ Disponível'];
+  }
+
+  const COLS = 10;
+  let rows = '';
+
+  // Title rows
+  rows += '<Row ss:Height="28">' + mc('LEVANTAMENTO DE NECESSIDADES — '+(est.id||''), C.darkBlue, C.white, true, 13, COLS) + '</Row>';
+  rows += '<Row ss:Height="18">' + mc(
+    (est.torre_tipo||'Torre')+(est.torre_altura?' · '+est.torre_altura:'')+
+    '  |  Inspeção: '+(est.data_inspecao||'—')+
+    '  |  '+priorLabel+'  |  '+(est.morada||est.local||'')+
+    '  |  Exportado: '+today,
+    C.medBlue, C.white, false, 9, COLS) + '</Row>';
+  rows += '<Row ss:Height="8"><Cell/></Row>';
 
   const groupKeys = famOrder.filter(k=>groups[k]&&groups[k].length);
   if (groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
 
   groupKeys.forEach(fam => {
     const items = groups[fam];
-    html += `<tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">
-      ▌ ${famLabel[fam]||fam} (${items.length})
-    </td></tr>
-    <tr>
-      <th class="col-hdr" width="30">#</th>
-      <th class="col-hdr" width="90">Ref. PHC</th>
-      <th class="col-hdr" width="80">Ref. MTMQ</th>
-      <th class="col-hdr">Designação</th>
-      <th class="col-hdr" width="35">Un</th>
-      <th class="col-hdr" width="40">Qtd.</th>
-      <th class="col-hdr" width="50">Stock</th>
-      <th class="col-hdr" width="80">Estado</th>
-      <th class="col-hdr" width="50">Armazém</th>
-      <th class="col-hdr">Observações</th>
-    </tr>`;
-
-    items.forEach((m, i) => {
-      const qty = typeof m.quantidade==='number'
-        ? (Number.isInteger(m.quantidade)?m.quantidade:m.quantidade.toFixed(2))
-        : m.quantidade;
-      const [sbg, sfg] = stockColor(m.stock, m.quantidade);
-      const stLbl = m.stock===null?'—':m.stock===0?'⚠ Sem stock':m.stock<m.quantidade?'⚠ Stock baixo':'✔ Disponível';
-      const arm   = m.ref_artigo && m.ref_artigo!=='—' ? getArmazem(m.ref_artigo) : '—';
-      const rowCls = i%2===0?'r-even':'r-odd';
-      html += `<tr class="${rowCls}">
-        <td style="text-align:center;color:#6c757d">${i+1}</td>
-        <td class="ref-phc" style="text-align:center">${m.ref_artigo||'—'}</td>
-        <td class="ref-mtmq" style="text-align:center">${m.ref_mtmq||'—'}</td>
-        <td>${m.nome_artigo||m.descricao_tecnica||'—'}</td>
-        <td style="text-align:center;color:#6c757d">${m.unidade||'un'}</td>
-        <td style="text-align:center;font-weight:bold">${qty}</td>
-        <td style="text-align:center;background:${sbg};color:${sfg};font-weight:bold">${m.stock!==null&&m.stock!==undefined?m.stock:'—'}</td>
-        <td style="text-align:center;background:${sbg};color:${sfg};font-weight:bold;font-size:9pt">${stLbl}</td>
-        <td style="text-align:center;color:#1F3864;font-weight:bold">${arm}</td>
-        <td style="font-size:9pt;color:#6c757d">${m.notas||''}</td>
-      </tr>`;
+    rows += sectionRow((famLabel[fam]||fam)+' ('+items.length+')', COLS);
+    rows += hdrRow([['#',40],['Ref. PHC',90],['Ref. MTMQ',80],['Designação',0],['Un',35],['Qtd.',40],['Stock',55],['Estado',90],['Armazém',55],['Observações',0]]);
+    items.forEach((m,i) => {
+      const qty = typeof m.quantidade==='number'?(Number.isInteger(m.quantidade)?m.quantidade:parseFloat(m.quantidade.toFixed(2))):m.quantidade;
+      const [sbg,sfg,stl] = stockBg(m.stock, m.quantidade);
+      const rowBg = i%2===0?C.grey:C.white;
+      const arm = m.ref_artigo&&m.ref_artigo!=='—'?getArmazem(m.ref_artigo):'—';
+      rows += '<Row ss:Height="18">' +
+        c(i+1,           rowBg, C.muted,  false, 10, false, 'Center') +
+        c(m.ref_artigo||'—', rowBg, '#1A5276', true,  10, false, 'Center') +
+        c(m.ref_mtmq||'—',   rowBg, '#E67E22', false,  9, false, 'Center') +
+        c(m.nome_artigo||m.descricao_tecnica||'—', rowBg, C.black, false, 10, true,  'Left') +
+        c(m.unidade||'un',   rowBg, C.muted,  false, 10, false, 'Center') +
+        c(qty,               rowBg, C.black,  true,  10, false, 'Center') +
+        c(m.stock!==null&&m.stock!==undefined?m.stock:'—', sbg, sfg, true, 10, false, 'Center') +
+        c(stl,               sbg,   sfg,     true,   9, false, 'Center') +
+        c(arm,               rowBg, C.darkBlue, true, 10, false, 'Center') +
+        c(m.notas||'',       rowBg, C.muted,  false,  9, true,  'Left') +
+        '</Row>';
     });
-    html += `<tr><td colspan="10" style="padding:3pt"></td></tr>`;
+    rows += '<Row ss:Height="6"><Cell/></Row>';
   });
 
-  // Tarefas sheet equivalent - add as second section
-  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
-  <tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">▌ TAREFAS (${(currentResult.tarefas||[]).length})</td></tr>
-  <tr>
-    <th class="col-hdr" width="70">Ref. MTMQ</th>
-    <th class="col-hdr" width="110">Categoria</th>
-    <th class="col-hdr">Descrição</th>
-    <th class="col-hdr" width="70">Urgência</th>
-  </tr>`;
-
+  // Tarefas
+  rows += '<Row ss:Height="8"><Cell/></Row>';
+  rows += sectionRow('TAREFAS ('+(currentResult.tarefas||[]).length+')', 4);
+  rows += hdrRow([['Ref. MTMQ',70],['Categoria',110],['Descrição',0],['Urgência',70]]);
   (currentResult.tarefas||[]).forEach((t,i) => {
-    const [ubg, ufg] = t.urgencia==='alta'?['#fde8e8','#c0392b']:t.urgencia==='media'?['#fef9e7','#e67e22']:['#eafaf1','#27ae60'];
+    const [ubg,ufg] = t.urgencia==='alta'?[C.red,C.redFg]:t.urgencia==='media'?[C.yellow,C.yellowFg]:[C.green,C.greenFg];
     const uLbl = t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
-    html += `<tr class="${i%2===0?'r-even':'r-odd'}">
-      <td class="ref-mtmq" style="text-align:center">${t.ref_mtmq||'—'}</td>
-      <td style="color:#6c757d">${t.categoria||'—'}</td>
-      <td>${t.descricao||'—'}</td>
-      <td style="text-align:center;background:${ubg};color:${ufg};font-weight:bold">${uLbl}</td>
-    </tr>`;
+    const bg = i%2===0?C.grey:C.white;
+    rows += '<Row ss:Height="20">' +
+      c(t.ref_mtmq||'—', bg, '#E67E22', true,  10, false, 'Center') +
+      c(t.categoria||'—', bg, C.muted,  false, 10, false, 'Left') +
+      c(t.descricao||'—', bg, C.black,  false, 10, true,  'Left') +
+      c(uLbl,             ubg, ufg,     true,   9, false, 'Center') +
+      '</Row>';
   });
 
   // Planeamento
-  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
-  <tr><td colspan="10" class="h-orange" style="padding:6pt 14pt">▌ PLANEAMENTO</td></tr>
-  <tr>
-    <th class="col-hdr" width="60">Dia</th>
-    <th class="col-hdr">Tarefas</th>
-    <th class="col-hdr" width="70">Duração</th>
-  </tr>`;
-
+  rows += '<Row ss:Height="8"><Cell/></Row>';
+  rows += sectionRow('PLANEAMENTO', 3);
+  rows += hdrRow([['Dia',60],['Tarefas',0],['Duração',70]]);
   (currentResult.planeamento||[]).forEach((d,i) => {
     const tasks = Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
-    html += `<tr class="${i%2===0?'r-even':'r-odd'}">
-      <td style="text-align:center;color:#1F3864;font-weight:bold;font-size:12pt">Dia ${d.dia}</td>
-      <td>${tasks}</td>
-      <td style="text-align:center;color:#2E75B6;font-weight:bold">${d.horas||'—'}</td>
-    </tr>`;
+    const bg = i%2===0?C.grey:C.white;
+    rows += '<Row ss:Height="28">' +
+      c('Dia '+d.dia, bg, C.darkBlue, true,  12, false, 'Center') +
+      c(tasks,        bg, C.black,    false, 10, true,  'Left') +
+      c(d.horas||'—', bg, C.medBlue,  true,  11, false, 'Center') +
+      '</Row>';
   });
 
-  html += `<tr><td colspan="10" style="padding:4pt"></td></tr>
-  <tr><td colspan="10" class="footer" style="padding:6pt 14pt">
-    Pingos Service · Building Your Communications · Gerado automaticamente em ${today}
-  </td></tr>
-</table></body></html>`;
+  // Footer
+  rows += '<Row ss:Height="8"><Cell/></Row>';
+  rows += '<Row ss:Height="18">' + mc('Pingos Service · Building Your Communications · Gerado automaticamente em '+today, C.darkBlue, C.white, false, 9, COLS) + '</Row>';
 
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  // Build final XML
+  const styles = Object.values(styleMap).join('\n');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:x="urn:schemas-microsoft-com:office:excel">
+<Styles>${styles}</Styles>
+<Worksheet ss:Name="Necessidades">
+<Table ss:DefaultColumnWidth="80">
+ <Column ss:Width="35"/>
+ <Column ss:Width="90"/>
+ <Column ss:Width="80"/>
+ <Column ss:Width="260"/>
+ <Column ss:Width="35"/>
+ <Column ss:Width="40"/>
+ <Column ss:Width="55"/>
+ <Column ss:Width="90"/>
+ <Column ss:Width="55"/>
+ <Column ss:Width="180"/>
+${rows}
+</Table>
+</Worksheet>
+</Workbook>`;
+
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'VT_Necessidades_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.xls';
+  a.download = 'VT_Necessidades_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xls';
   a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
 
 function downloadReport() {
@@ -1881,10 +1937,18 @@ ${alertsHTML ? `
 </body>
 </html>`;
 
-  // Open in new window for print/save as PDF
-  const win = window.open('', '_blank', 'width=900,height=800');
-  win.document.write(reportHTML);
-  win.document.close();
+  // Create blob and open in new tab (works in Electron + all browsers)
+  const blob = new Blob([reportHTML], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, '_blank');
+  if (!win) {
+    // Fallback: download as HTML file if popup blocked
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'VT_Relatorio_' + (est.id||'obra').replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.html';
+    a.click();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 
