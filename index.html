@@ -97,10 +97,7 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    overflow-y: scroll !important;
-    overflow-x: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    overflow: hidden;
     min-height: 0;
   }
 
@@ -673,7 +670,8 @@
 <div class="app-layout">
 
   <!-- ── LEFT PANEL ── -->
-  <div class="left-panel">
+  <div class="left-panel" id="leftPanel">
+    <div id="leftScroll" style="flex:1;overflow-y:auto;overflow-x:hidden;min-height:0;display:flex;flex-direction:column;scrollbar-width:thin;scrollbar-color:var(--border) transparent">
     <div class="panel-header">
       <div class="panel-title">Relatório ISQ</div>
       <div class="panel-subtitle">Carregue o PDF de inspeção para análise automática</div>
@@ -767,7 +765,7 @@
       </div>
       <div id="obraPriority"></div>
     </div>
-  </div>
+  </div></div>
 
   <!-- ── RIGHT PANEL ── -->
   <div class="right-panel">
@@ -1477,29 +1475,68 @@ function downloadExcel() {
   if (!currentResult) return;
   const est   = currentResult.estacao || {};
   const today = new Date().toLocaleDateString('pt-PT');
-  const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
+  const btnEl = document.getElementById('btnDlXls');
 
-  // Exact colours from example file
-  const C = {
-    darkBlue:'#1F3864', medBlue:'#2E75B6', orange:'#ED7D31',
-    white:'#FFFFFF', grey:'#F2F2F2', black:'#000000',
-    muted:'#6C757D', blue1:'#1A5276', blue2:'#E67E22',
-    red:'#FDE8E8',   redFg:'#C0392B',
-    green:'#EAFAF1', greenFg:'#27AE60',
-    yellow:'#FEF9E7',yellowFg:'#E67E22',
-    noref:'#F8F9FA', norefFg:'#6C757D',
-    darkBlueTx:'#1F3864', medBlueTx:'#2E75B6'
+  // Build payload for server-side Python/openpyxl generation
+  const payload = {
+    estacao:      est,
+    tarefas:      currentResult.tarefas    || [],
+    planeamento:  currentResult.planeamento || [],
+    alertas:      currentResult.alertas    || [],
+    necessidades: allNeeds,
+    today:        today,
   };
 
-  // Column widths matching example (in pts): A=10,B=9,C=22,D=78,E=5,F=6,G=5,H=13,I=9,J=22
-  // Convert: Excel char width ≈ pts * 7
-  const COL_W_PTS = [55,50,120,430,28,36,32,72,50,125];
+  // Try server-side generation first (localhost:3131)
+  // Falls back to client-side XML if server not available
+  const fname = 'VT_Necessidades_' + (est.id||'obra').replace(/\s+/g,'_') +
+                '_' + new Date().toISOString().slice(0,10) + '.xlsx';
+
+  if (btnEl) btnEl.textContent = '⏳ A gerar...';
+
+  fetch('http://localhost:3131/generate-excel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  .then(r => {
+    if (!r.ok) throw new Error('Server error ' + r.status);
+    return r.blob();
+  })
+  .then(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    if (btnEl) btnEl.innerHTML = '<span>⬇ Gerar Relatório</span><span id="exportChevron" style="font-size:9px">▲</span>';
+  })
+  .catch(() => {
+    // Fallback: client-side XML Spreadsheet
+    if (btnEl) btnEl.innerHTML = '<span>⬇ Gerar Relatório</span><span id="exportChevron" style="font-size:9px">▲</span>';
+    downloadExcelFallback(payload, fname);
+  });
+}
+
+function downloadExcelFallback(payload, fname) {
+  const est   = payload.estacao || {};
+  const today = payload.today || new Date().toLocaleDateString('pt-PT');
+  const priorLabel = est.prioridade===1?'NÍVEL 1 – IMEDIATA':est.prioridade===2?'NÍVEL 2 – ALTA':'NÍVEL 3 – MÉDIA';
+
+  const C = {
+    darkBlue:'#1F3864',medBlue:'#2E75B6',orange:'#ED7D31',
+    white:'#FFFFFF',grey:'#F2F2F2',black:'#000000',muted:'#6C757D',
+    blue1:'#1A5276',blue2:'#E67E22',darkBlueTx:'#1F3864',medBlueTx:'#2E75B6',
+    red:'#FDE8E8',redFg:'#C0392B',green:'#EAFAF1',greenFg:'#27AE60',
+    yellow:'#FEF9E7',yellowFg:'#E67E22',noref:'#F8F9FA',norefFg:'#6C757D'
+  };
 
   const styleMap = {};
   function S(bg,fg,bold,sz,wrap,ha) {
-    const b=bold?1:0, s=sz||11, w=wrap?1:0, h=ha||'Left';
-    const bg2=(bg||'#FFFFFF').replace('#','');
-    const fg2=(fg||'#000000').replace('#','');
+    const b=bold?1:0,s=sz||11,w=wrap?1:0,h=ha||'Left';
+    const bg2=(bg||'#FFFFFF').replace('#',''),fg2=(fg||'#000000').replace('#','');
     const id=`_${bg2}_${fg2}_${b}_${s}_${w}_${h}`;
     if(!styleMap[id]) styleMap[id]=`<Style ss:ID="${id}">
       <Alignment ss:Horizontal="${h}" ss:Vertical="Center" ss:WrapText="${w}"/>
@@ -1514,188 +1551,107 @@ function downloadExcel() {
     </Style>`;
     return id;
   }
-
   function C1(val,bg,fg,bold,sz,wrap,ha,merge) {
     S(bg,fg,bold,sz,wrap,ha);
-    const bg2=(bg||'#FFFFFF').replace('#','');
-    const fg2=(fg||'#000000').replace('#','');
-    const b=bold?1:0, s=sz||11, w=wrap?1:0, h=ha||'Left';
+    const bg2=(bg||'#FFFFFF').replace('#',''),fg2=(fg||'#000000').replace('#','');
+    const b=bold?1:0,s=sz||11,w=wrap?1:0,h=ha||'Left';
     const t=typeof val==='number'?'Number':'String';
     const v=String(val??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const ma=merge&&merge>1?` ss:MergeAcross="${merge-1}"`:'';
     return `<Cell ss:StyleID="_${bg2}_${fg2}_${b}_${s}_${w}_${h}"${ma}><Data ss:Type="${t}">${v}</Data></Cell>`;
   }
-  function B(bg) { return C1('',bg||C.white,C.black,false,11,false,'Left'); }
-
-  // Full-width merged row (10 cols)
-  function fullRow(val,bg,fg,bold,sz,h) {
-    return `<Row ss:Height="${(sz||11)+6}">`+
-      C1(val,bg,fg,bold,sz||11,true,h||'Left',10)+
-      Array(9).fill(B(bg)).join('')+
-      `</Row>`;
+  function B(bg){return C1('',bg||C.white,C.black,false,11,false,'Left');}
+  function full(val,bg,fg,bold,sz,h){
+    return `<Row ss:Height="${h||16}">`+C1(val,bg,fg,bold,sz||11,true,'Left',10)+Array(9).fill(B(bg)).join('')+`</Row>`;
+  }
+  function sec(label){return `<Row ss:Height="16">`+C1('▌ '+label,C.orange,C.white,true,11,true,'Left',10)+Array(9).fill(B(C.orange)).join('')+`</Row>`;}
+  function hdrN(){
+    return '<Row ss:Height="15">'+['#','Ref. PHC','Ref. MTMQ','Designação','Un','Qtd.','Stock','Estado','Armazém','Observações'].map(h=>C1(h,C.medBlue,C.white,true,9,true,'Center')).join('')+'</Row>';
+  }
+  function hdrT(){
+    return '<Row ss:Height="15">'+
+      C1('Ref. MTMQ',C.medBlue,C.white,true,9,false,'Center')+B(C.medBlue)+
+      C1('Categoria',C.medBlue,C.white,true,9,false,'Left')+C1('Descrição',C.medBlue,C.white,true,9,false,'Left')+
+      B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+C1('Urgência',C.medBlue,C.white,true,9,false,'Center')+B(C.medBlue)+B(C.medBlue)+'</Row>';
+  }
+  function hdrP(){
+    return '<Row ss:Height="15">'+
+      C1('Dia',C.medBlue,C.white,true,9,false,'Center')+B(C.medBlue)+B(C.medBlue)+
+      C1('Tarefas',C.medBlue,C.white,true,9,false,'Left')+B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+
+      C1('Duração',C.medBlue,C.white,true,9,false,'Center')+B(C.medBlue)+B(C.medBlue)+'</Row>';
+  }
+  function sk(s,q){
+    if(s===null||s===undefined)return[C.noref,C.norefFg,'—'];
+    if(s===0)return[C.red,C.redFg,'⚠ Sem stock'];
+    if(s<q)return[C.yellow,C.yellowFg,'⚠ Stock baixo'];
+    return[C.green,C.greenFg,'✔ Disponível'];
   }
 
-  // Section header (orange)
-  function section(label) {
-    return `<Row ss:Height="18">`+
-      C1('▌ '+label,C.orange,C.white,true,11,true,'Left',10)+
-      Array(9).fill(B(C.orange)).join('')+
-      `</Row>`;
-  }
+  const famOrder=['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
+  const famLabel={'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento','MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
+  const groups={};
+  (payload.necessidades||[]).forEach(m=>{const g=famOrder.includes(m.familia)?m.familia:'Outro';if(!groups[g])groups[g]=[];groups[g].push(m);});
 
-  // Standard 10-col needs header matching example
-  function hdrNeeds() {
-    const cols=[['#',C.white,'Center'],['Ref. PHC',C.white,'Center'],['Ref. MTMQ',C.white,'Center'],
-                ['Designação',C.white,'Center'],['Un',C.white,'Center'],['Qtd.',C.white,'Center'],
-                ['Stock',C.white,'Center'],['Estado',C.white,'Center'],['Armazém',C.white,'Center'],
-                ['Observações',C.white,'Center']];
-    return '<Row ss:Height="16">'+cols.map(([v,,ha])=>C1(v,C.medBlue,C.white,true,9,true,ha)).join('')+'</Row>';
-  }
+  let rows='';
+  rows+=full('LEVANTAMENTO DE NECESSIDADES — '+(est.id||''),C.darkBlue,C.white,true,12,15.75);
+  rows+=full((est.torre_tipo||'Torre')+(est.torre_altura?' · '+est.torre_altura:'')+' | Inspeção: '+(est.data_inspecao||'—')+' | '+priorLabel+' | '+(est.morada||est.local||''),C.medBlue,C.white,true,9,14.25);
+  rows+=`<Row ss:Height="6">`+B(C.white)+`</Row>`;
 
-  // Tarefas header: A=Ref.MTMQ, B=blank, C=Categoria, D=Descrição, E-G=blank, H=Urgência, I-J=blank
-  function hdrTarefas() {
-    return '<Row ss:Height="16">'+
-      C1('Ref. MTMQ',C.medBlue,C.white,true,9,false,'Center')+  // A
-      B(C.medBlue)+                                               // B
-      C1('Categoria', C.medBlue,C.white,true,9,false,'Left')+    // C
-      C1('Descrição', C.medBlue,C.white,true,9,false,'Left')+    // D
-      B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+                    // E F G
-      C1('Urgência',  C.medBlue,C.white,true,9,false,'Center')+  // H
-      B(C.medBlue)+B(C.medBlue)+                                  // I J
-    '</Row>';
-  }
-
-  // Planeamento header: A=Dia, B-C=blank, D=Tarefas, E-G=blank, H=Duração, I-J=blank
-  function hdrPlan() {
-    return '<Row ss:Height="16">'+
-      C1('Dia',     C.medBlue,C.white,true,9,false,'Center')+    // A
-      B(C.medBlue)+B(C.medBlue)+                                  // B C
-      C1('Tarefas', C.medBlue,C.white,true,9,false,'Left')+      // D
-      B(C.medBlue)+B(C.medBlue)+B(C.medBlue)+                    // E F G
-      C1('Duração', C.medBlue,C.white,true,9,false,'Center')+    // H
-      B(C.medBlue)+B(C.medBlue)+                                  // I J
-    '</Row>';
-  }
-
-  function stockInfo(stock,qty) {
-    if(stock===null||stock===undefined) return [C.noref,C.norefFg,'—'];
-    if(stock===0)    return [C.red,    C.redFg,    '⚠ Sem stock'];
-    if(stock<qty)    return [C.yellow, C.yellowFg, '⚠ Stock baixo'];
-    return [C.green, C.greenFg, '✔ Disponível'];
-  }
-
-  const famOrder = ['MATERIAL PROPRIO','EPIS/FARDAMENTO','MAQUINA','FERRAMENTA','SERVIÇOS'];
-  const famLabel = {'MATERIAL PROPRIO':'Materiais','EPIS/FARDAMENTO':'EPI / Fardamento',
-                    'MAQUINA':'Máquinas','FERRAMENTA':'Ferramentas','SERVIÇOS':'Serviços'};
-  const groups = {};
-  allNeeds.forEach(m => {
-    const g = famOrder.includes(m.familia)?m.familia:'Outro';
-    if(!groups[g]) groups[g]=[]; groups[g].push(m);
-  });
-
-  let rows = '';
-
-  // ── TITLE ROWS (merged A:J) ──
-  rows += fullRow('LEVANTAMENTO DE NECESSIDADES — '+(est.id||''), C.darkBlue, C.white, true, 12);
-  rows += fullRow(
-    (est.torre_tipo||'Torre')+(est.torre_altura?' · '+est.torre_altura:'')+
-    '  |  Inspeção: '+(est.data_inspecao||'—')+'  |  '+priorLabel+
-    '  |  '+(est.morada||est.local||''), C.medBlue, C.white, true, 9);
-  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
-
-  // ── NECESSIDADES GROUPS ──
-  const groupKeys = famOrder.filter(k=>groups[k]&&groups[k].length);
-  if(groups['Outro']&&groups['Outro'].length) groupKeys.push('Outro');
-
-  groupKeys.forEach(fam => {
-    const items = groups[fam];
-    rows += section((famLabel[fam]||fam)+' ('+items.length+')');
-    rows += hdrNeeds();
-    items.forEach((m,i) => {
-      const qty = typeof m.quantidade==='number'?(Number.isInteger(m.quantidade)?m.quantidade:parseFloat(m.quantidade.toFixed(2))):m.quantidade;
-      const [sbg,sfg,stl] = stockInfo(m.stock, m.quantidade);
-      const bg = i%2===0?C.grey:C.white;
-      const arm = m.ref_artigo&&m.ref_artigo!=='—'?getArmazem(m.ref_artigo):'—';
-      rows += '<Row ss:Height="28.5">'+
-        C1(i+1,                          bg,  C.muted,  false,11,true,'Center')+  // A #
-        C1(m.ref_artigo||'—',            bg,  C.blue1,  true, 11,true,'Center')+  // B RefPHC
-        C1(m.ref_mtmq||'—',              bg,  C.blue2,  false, 9,true,'Center')+  // C RefMTMQ
-        C1(m.nome_artigo||m.descricao_tecnica||'—',bg,C.black,false,11,true,'Left')+ // D Designação
-        C1(m.unidade||'un',              bg,  C.muted,  false,11,true,'Center')+  // E Un
-        C1(qty,                          bg,  C.black,  true, 11,true,'Center')+  // F Qtd
-        C1(m.stock!==null&&m.stock!==undefined?m.stock:'—',sbg,sfg,true,11,true,'Center')+ // G Stock
-        C1(stl,                          sbg, sfg,      true,  9,true,'Center')+  // H Estado
-        C1(arm,                          bg,  C.darkBlueTx,true,11,true,'Center')+ // I Armazém
-        C1(m.notas||'',                  bg,  C.muted,  false, 9,true,'Left')+    // J Obs
+  const gk=famOrder.filter(k=>groups[k]&&groups[k].length);
+  if(groups['Outro']&&groups['Outro'].length)gk.push('Outro');
+  gk.forEach(fam=>{
+    const items=groups[fam];
+    rows+=sec((famLabel[fam]||fam)+' ('+items.length+')');
+    rows+=hdrN();
+    items.forEach((m,i)=>{
+      const qty=typeof m.quantidade==='number'?(Number.isInteger(m.quantidade)?m.quantidade:parseFloat(m.quantidade.toFixed(2))):m.quantidade;
+      const[sbg,sfg,stl]=sk(m.stock,m.quantidade);
+      const bg=i%2===0?C.grey:C.white;
+      const arm=m.ref_artigo&&m.ref_artigo!=='—'?getArmazem(m.ref_artigo):'—';
+      rows+='<Row ss:Height="28.5">'+
+        C1(i+1,bg,C.muted,false,11,true,'Center')+C1(m.ref_artigo||'—',bg,C.blue1,true,11,true,'Center')+
+        C1(m.ref_mtmq||'—',bg,C.blue2,false,9,true,'Center')+C1(m.nome_artigo||m.descricao_tecnica||'—',bg,C.black,false,11,true,'Left')+
+        C1(m.unidade||'un',bg,C.muted,false,11,true,'Center')+C1(qty,bg,C.black,true,11,true,'Center')+
+        C1(m.stock!==null&&m.stock!==undefined?m.stock:'—',sbg,sfg,true,11,true,'Center')+C1(stl,sbg,sfg,true,9,true,'Center')+
+        C1(arm,bg,C.darkBlueTx,true,11,true,'Center')+C1(m.notas||'',bg,C.muted,false,9,true,'Left')+
       '</Row>';
     });
-    rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
+    rows+=`<Row ss:Height="6">`+B(C.white)+`</Row>`;
   });
 
-  // ── TAREFAS ──
-  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
-  rows += section('TAREFAS ('+(currentResult.tarefas||[]).length+')');
-  rows += hdrTarefas();
-  (currentResult.tarefas||[]).forEach((t,i) => {
-    const [ubg,ufg] = t.urgencia==='alta'?[C.red,C.redFg]:t.urgencia==='media'?[C.yellow,C.yellowFg]:[C.green,C.greenFg];
-    const uLbl = t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
-    const bg = i%2===0?C.grey:C.white;
-    rows += '<Row ss:Height="28.5">'+
-      C1(t.ref_mtmq||'—',  bg, C.blue2, false, 9,true,'Center')+  // A Ref.MTMQ
-      B(bg)+                                                         // B blank
-      C1(t.categoria||'—', bg, C.muted, false,11,true,'Left')+     // C Categoria
-      C1(t.descricao||'—', bg, C.black, false,11,true,'Left')+     // D Descrição
-      B(bg)+B(bg)+B(bg)+                                             // E F G blank
-      C1(uLbl,             ubg,ufg,     true, 11,false,'Center')+  // H Urgência
-      B(bg)+B(bg)+                                                   // I J blank
-    '</Row>';
+  rows+=`<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows+=sec('TAREFAS ('+(payload.tarefas||[]).length+')');rows+=hdrT();
+  (payload.tarefas||[]).forEach((t,i)=>{
+    const bg=i%2===0?C.grey:C.white;
+    const[ubg,ufg]=t.urgencia==='alta'?[C.red,C.redFg]:t.urgencia==='media'?[C.yellow,C.yellowFg]:[C.green,C.greenFg];
+    const uL=t.urgencia==='alta'?'🔴 ALTA':t.urgencia==='media'?'🟡 MÉDIA':'🟢 BAIXA';
+    rows+='<Row ss:Height="28.5">'+C1(t.ref_mtmq||'—',bg,C.blue2,false,9,true,'Center')+B(bg)+C1(t.categoria||'—',bg,C.muted,false,11,true,'Left')+C1(t.descricao||'—',bg,C.black,false,11,true,'Left')+B(bg)+B(bg)+B(bg)+C1(uL,ubg,ufg,true,11,false,'Center')+B(bg)+B(bg)+'</Row>';
   });
 
-  // ── PLANEAMENTO ──
-  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
-  rows += section('PLANEAMENTO — '+(currentResult.dias_estimados||'?')+' DIA(S)');
-  rows += hdrPlan();
-  (currentResult.planeamento||[]).forEach((d,i) => {
-    const tasks = Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
-    const bg = i%2===0?C.grey:C.white;
-    rows += '<Row ss:Height="28.5">'+
-      C1('Dia '+d.dia, bg, C.darkBlueTx, true, 12,false,'Center')+  // A Dia
-      B(bg)+B(bg)+                                                    // B C blank
-      C1(tasks,        bg, C.black,      false,11,true, 'Left')+    // D Tarefas
-      B(bg)+B(bg)+B(bg)+                                             // E F G blank
-      C1(d.horas||'—', bg, C.medBlueTx,  true, 11,false,'Center')+ // H Duração
-      B(bg)+B(bg)+                                                   // I J blank
-    '</Row>';
+  rows+=`<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows+=sec('PLANEAMENTO — '+(currentResult.dias_estimados||'?')+' DIA(S)');rows+=hdrP();
+  (payload.planeamento||[]).forEach((d,i)=>{
+    const bg=i%2===0?C.grey:C.white;
+    const tk=Array.isArray(d.tarefas)?d.tarefas.join(' · '):(d.tarefas||'');
+    rows+='<Row ss:Height="28.5">'+C1('Dia '+d.dia,bg,C.darkBlueTx,true,12,false,'Center')+B(bg)+B(bg)+C1(tk,bg,C.black,false,11,true,'Left')+B(bg)+B(bg)+B(bg)+C1(d.horas||'—',bg,C.medBlueTx,true,11,false,'Center')+B(bg)+B(bg)+'</Row>';
   });
 
-  // ── FOOTER ──
-  rows += `<Row ss:Height="6">`+B(C.white)+`</Row>`;
-  rows += fullRow('Pingos Service · Building Your Communications · Gerado automaticamente em '+today, C.darkBlue, C.white, false, 8);
+  rows+=`<Row ss:Height="6">`+B(C.white)+`</Row>`;
+  rows+=full('Pingos Service · Building Your Communications · Gerado automaticamente em '+today,C.darkBlue,C.white,false,8,14.25);
 
-  const colDefs = COL_W_PTS.map(w=>`<Column ss:Width="${w}"/>`).join('\n ');
-  const stylesDefs = Object.values(styleMap).join('\n');
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:x="urn:schemas-microsoft-com:office:excel">
-<Styles>${stylesDefs}</Styles>
-<Worksheet ss:Name="Necessidades">
-<Table ss:DefaultColumnWidth="60">
+  const colDefs=[10.14,9.29,22.0,78.86,5.0,6.57,5.71,13.14,9.14,22.29].map(w=>`<Column ss:Width="${w*7.5}"/>`).join('\n ');
+  const xml=`<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles>${Object.values(styleMap).join('\n')}</Styles>
+<Worksheet ss:Name="Necessidades"><Table ss:DefaultColumnWidth="60">
  ${colDefs}
-${rows}
-</Table>
-</Worksheet>
-</Workbook>`;
+${rows}</Table></Worksheet></Workbook>`;
 
-  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'VT_Necessidades_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xls';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const blob=new Blob([xml],{type:'application/vnd.ms-excel;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=fname.replace('.xlsx','.xls');
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
@@ -1872,15 +1828,40 @@ ${aHTML?`<div style="background:#ed7d31;color:#fff;font-size:10px;font-weight:70
   <span>Pingos Service · Building Your Communications</span><span>Gerado automaticamente · ${today}</span>
 </div></body></html>`;
 
-  const blob=new Blob([doc],{type:'text/html;charset=utf-8'});
   const fname='VT_Relatorio_'+(est.id||'obra').replace(/\s+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.html';
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=fname;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+
+  // Try multiple approaches for maximum compatibility
+  let opened = false;
+
+  // Approach 1: data: URI in new tab (works in browser + Electron)
+  try {
+    const encoded = 'data:text/html;charset=utf-8,' + encodeURIComponent(doc);
+    const win = window.open(encoded, '_blank');
+    if (win) { opened = true; }
+  } catch(e) {}
+
+  // Approach 2: blob URL in new tab
+  if (!opened) {
+    try {
+      const blob = new Blob([doc], {type:'text/html;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (win) { opened = true; setTimeout(()=>URL.revokeObjectURL(url), 30000); }
+    } catch(e) {}
+  }
+
+  // Approach 3: direct download (fallback)
+  if (!opened) {
+    const blob = new Blob([doc], {type:'text/html;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+    alert('Relatório guardado como ' + fname + '\nAbra o ficheiro e use Ctrl+P para gerar o PDF.');
+  }
 }
 
 
